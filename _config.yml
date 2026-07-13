@@ -1,0 +1,8 @@
+title: Release Scripts
+description: Consistent numbered and tagged GitHub releases
+theme: jekyll-theme-minimal
+exclude:
+  - tests
+  - lib
+  - mise-tasks
+  - tools

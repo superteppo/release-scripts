@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/common.sh"
+# shellcheck source=lib/version.sh
+source "$SCRIPT_DIR/version.sh"
+
+usage() {
+    cat <<'EOF'
+Usage: release.sh [OPTIONS] major|minor|patch
+       release.sh --promote [OPTIONS]
+
+Options:
+  --pre          create an rc.1 prerelease
+  --promote      promote the latest rc tag to a stable release
+  --dry-run      show the release plan without changing anything
+  --no-publish   create the local commit and tag without pushing
+  -h, --help     show this help
+EOF
+}
+
+PRE=false
+PROMOTE=false
+DRY_RUN=false
+PUBLISH=true
+BUMP=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --pre) PRE=true ;;
+        --promote) PROMOTE=true ;;
+        --dry-run) DRY_RUN=true ;;
+        --no-publish) PUBLISH=false ;;
+        major|minor|patch)
+            [[ -z "$BUMP" ]] || release_die "only one version bump may be specified"
+            BUMP=$1
+            ;;
+        -h|--help) usage; exit 0 ;;
+        *) release_die "unknown argument: $1" ;;
+    esac
+    shift
+done
+
+if $PROMOTE; then
+    ! $PRE && [[ -z "$BUMP" ]] || release_die "--promote cannot be combined with --pre or a bump"
+else
+    [[ -n "$BUMP" ]] || { usage >&2; exit 1; }
+fi
+
+if [[ -n "${RELEASE_GET_VERSION:-}" || -n "${RELEASE_SET_VERSION:-}" ]]; then
+    [[ -n "${RELEASE_GET_VERSION:-}" && -n "${RELEASE_SET_VERSION:-}" ]] || \
+        release_die "RELEASE_GET_VERSION and RELEASE_SET_VERSION must be configured together"
+fi
+
+release_require_command git
+ROOT=$(release_project_root)
+cd "$ROOT"
+[[ -z "$(git status --porcelain)" ]] || release_die "working tree is not clean"
+
+TAG_PREFIX=${RELEASE_TAG_PREFIX-v}
+LATEST_STABLE_TAG=$(release_latest_stable_tag "$TAG_PREFIX" || true)
+LATEST_STABLE_VERSION="0.0.0"
+if [[ -n "$LATEST_STABLE_TAG" ]]; then
+    LATEST_STABLE_VERSION=$(release_version_from_tag "$LATEST_STABLE_TAG" "$TAG_PREFIX")
+fi
+
+PACKAGE_VERSION=""
+if [[ -n "${RELEASE_GET_VERSION:-}" ]]; then
+    PACKAGE_VERSION_RAW=$(bash -o pipefail -c "$RELEASE_GET_VERSION") || \
+        release_die "RELEASE_GET_VERSION failed"
+    PACKAGE_VERSION_RAW=$(release_trim "$PACKAGE_VERSION_RAW")
+    PACKAGE_VERSION=$(release_normalize_version "$PACKAGE_VERSION_RAW") || \
+        release_die "unsupported package version returned by RELEASE_GET_VERSION: ${PACKAGE_VERSION_RAW}"
+fi
+
+if $PROMOTE; then
+    PRE_TAG=$(release_latest_prerelease_tag "$TAG_PREFIX" || true)
+    [[ -n "$PRE_TAG" ]] || release_die "no ${TAG_PREFIX}X.Y.Z-rc.N tag found to promote"
+    CURRENT_VERSION=$(release_version_from_tag "$PRE_TAG" "$TAG_PREFIX")
+    TARGET_VERSION=${CURRENT_VERSION%%-rc.*}
+    PREVIOUS_TAG=$PRE_TAG
+    if [[ -n "$PACKAGE_VERSION" && "$PACKAGE_VERSION" != "$CURRENT_VERSION" ]]; then
+        release_die "package version ${PACKAGE_VERSION} does not match prerelease tag ${CURRENT_VERSION}"
+    fi
+else
+    CURRENT_VERSION=${PACKAGE_VERSION:-$LATEST_STABLE_VERSION}
+    [[ "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+        release_die "current version is a prerelease; use --promote"
+    if [[ -n "$PACKAGE_VERSION" && -n "$LATEST_STABLE_TAG" && "$PACKAGE_VERSION" != "$LATEST_STABLE_VERSION" ]]; then
+        release_die "package version ${PACKAGE_VERSION} does not match latest tag ${LATEST_STABLE_VERSION}"
+    fi
+    TARGET_VERSION=$(release_bump_version "$CURRENT_VERSION" "$BUMP") || \
+        release_die "cannot bump version: ${CURRENT_VERSION}"
+    $PRE && TARGET_VERSION="${TARGET_VERSION}-rc.1"
+    PREVIOUS_TAG=$LATEST_STABLE_TAG
+fi
+
+TAG="${TAG_PREFIX}${TARGET_VERSION}"
+git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null && release_die "tag already exists: ${TAG}"
+
+export RELEASE_VERSION=$TARGET_VERSION
+export RELEASE_VERSION_PEP440
+RELEASE_VERSION_PEP440=$(release_pep440_version "$TARGET_VERSION")
+export RELEASE_TAG=$TAG
+export RELEASE_BUMP=${BUMP:-promote}
+
+release_info "Release plan"
+release_info "  Current: ${CURRENT_VERSION}"
+release_info "  Target:  ${TARGET_VERSION}"
+release_info "  Tag:     ${TAG}"
+release_info "  Publish: ${PUBLISH}"
+
+if $DRY_RUN; then
+    [[ -z "${RELEASE_SET_VERSION:-}" ]] || release_info "  Version command: ${RELEASE_SET_VERSION}"
+    [[ -z "${RELEASE_CHECK_COMMAND:-}" ]] || release_info "  Check command:   ${RELEASE_CHECK_COMMAND}"
+    [[ -z "${RELEASE_BUILD_COMMAND:-}" ]] || release_info "  Build command:   ${RELEASE_BUILD_COMMAND}"
+    exit 0
+fi
+
+if [[ -n "${RELEASE_SET_VERSION:-}" ]]; then
+    release_run_hook "Set version ${TARGET_VERSION}" "$RELEASE_SET_VERSION"
+    VERIFIED_RAW=$(bash -o pipefail -c "$RELEASE_GET_VERSION") || \
+        release_die "RELEASE_GET_VERSION failed after setting the version"
+    VERIFIED_RAW=$(release_trim "$VERIFIED_RAW")
+    VERIFIED=$(release_normalize_version "$VERIFIED_RAW") || \
+        release_die "unsupported version after update: ${VERIFIED_RAW}"
+    [[ "$VERIFIED" == "$TARGET_VERSION" ]] || \
+        release_die "version command produced ${VERIFIED}; expected ${TARGET_VERSION}"
+fi
+
+release_run_hook "Checks" "${RELEASE_CHECK_COMMAND:-}"
+release_run_hook "Build" "${RELEASE_BUILD_COMMAND:-}"
+release_expand_artifacts
+
+SAFE_TAG=${TAG//\//-}
+NOTES_FILE="$ROOT/.git/release-notes-${SAFE_TAG}.md"
+CHANGELOG=${RELEASE_CHANGELOG:-CHANGELOG.md}
+CHANGELOG_ARGS=(--version "$TARGET_VERSION" --output "$CHANGELOG" --notes "$NOTES_FILE")
+[[ -z "$PREVIOUS_TAG" ]] || CHANGELOG_ARGS+=(--from "$PREVIOUS_TAG")
+"$SCRIPT_DIR/changelog.sh" "${CHANGELOG_ARGS[@]}"
+
+git add -u
+if [[ "$CHANGELOG" != "false" && -f "$CHANGELOG" ]]; then
+    git add -- "$CHANGELOG"
+fi
+if ! git diff --cached --quiet; then
+    git commit -m "chore(release): ${TAG}"
+fi
+
+git tag -a "$TAG" -m "$TAG"
+release_info "Created ${TAG}"
+
+if $PUBLISH; then
+    github_args=("$TAG" "$NOTES_FILE")
+    [[ "$TARGET_VERSION" == *-rc.* ]] && github_args+=(--prerelease)
+    "$SCRIPT_DIR/github.sh" "${github_args[@]}"
+else
+    release_info "Local release complete; publish later with release:github ${TAG}"
+fi
