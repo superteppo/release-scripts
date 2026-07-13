@@ -181,4 +181,42 @@ if "$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run patch >/dev/null 2>&
     fail "invalid release branch regex was accepted"
 fi
 
+# Conventional Commits deterministically select the highest required bump.
+CONVENTIONAL_PROJECT="$TMP_ROOT/conventional"
+mkdir -p "$CONVENTIONAL_PROJECT"
+cd "$CONVENTIONAL_PROJECT"
+git init -q
+git checkout -q -b main
+git config user.name "Release Tests"
+git config user.email "release-tests@example.invalid"
+printf 'initial\n' > changes.txt
+git add changes.txt
+git commit -q -m "chore: initial project"
+git tag -a v1.2.3 -m v1.2.3
+export RELEASE_BRANCH_PATTERN=main
+unset RELEASE_MOVING_TAGS RELEASE_ARTIFACTS RELEASE_CHECK_COMMAND RELEASE_BUILD_COMMAND
+export RELEASE_CHANGELOG=false
+
+printf 'chore\n' >> changes.txt
+git commit -q -am "chore: update tooling"
+if "$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run auto >/dev/null 2>&1; then
+    fail "non-release Conventional Commits should not select a bump"
+fi
+
+printf 'fix\n' >> changes.txt
+git commit -q -am "fix(parser): handle empty input"
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run auto)
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  1.2.4"
+
+printf 'feature\n' >> changes.txt
+git commit -q -am "FeAt(api): add batch endpoint"
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run auto)
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  1.3.0"
+
+printf 'breaking\n' >> changes.txt
+git add changes.txt
+git commit -q -m "refactor: replace configuration model" -m "BREAKING CHANGE: configuration keys were renamed"
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run auto)
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  2.0.0"
+
 printf 'All release tests passed.\n'

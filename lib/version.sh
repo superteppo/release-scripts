@@ -39,6 +39,28 @@ release_bump_version() {
     printf '%s.%s.%s\n' "$major" "$minor" "$patch"
 }
 
+release_recommended_bump() {
+    local from_tag=${1:-}
+    local range=HEAD
+    local subjects bodies
+    [[ -z "$from_tag" ]] || range="${from_tag}..HEAD"
+
+    subjects=$(git log "$range" --pretty=format:%s)
+    bodies=$(git log "$range" --pretty=format:%b)
+    [[ -n "$subjects" ]] || return 1
+
+    if printf '%s\n' "$subjects" | grep -Eiq '^[[:alnum:]-]+(\([^)]*\))?!: ' || \
+       printf '%s\n' "$bodies" | grep -Eq '^BREAKING([ -])CHANGE: '; then
+        printf '%s\n' major
+    elif printf '%s\n' "$subjects" | grep -Eiq '^feat(\([^)]*\))?: '; then
+        printf '%s\n' minor
+    elif printf '%s\n' "$subjects" | grep -Eiq '^fix(\([^)]*\))?: '; then
+        printf '%s\n' patch
+    else
+        return 1
+    fi
+}
+
 release_version_from_tag() {
     local tag=$1
     local prefix=$2

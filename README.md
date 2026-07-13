@@ -119,9 +119,11 @@ branch name.
 
 ```console
 mise run release patch
+mise run release auto
 mise run release minor
 mise run release major
 mise run release --pre minor
+mise run release --pre auto
 mise run release --promote
 mise run release --dry-run patch
 mise run release --moving-tags major,minor patch
@@ -135,6 +137,20 @@ Release assets are replaced safely when GitHub publishing is retried.
 Moving tags are optional. For a stable `v2.3.0` release, `major minor` updates
 `v2` and `v2.3` to the same commit. They are force-updated atomically with the
 immutable release tag. Prereleases never move these aliases.
+
+### Automatic version bump
+
+Use `auto` to inspect commit messages from the latest stable `X.Y.Z` tag through
+`HEAD`:
+
+- `BREAKING CHANGE:` or `type!:` selects `major`.
+- `feat:` selects `minor`.
+- `fix:` selects `patch`.
+- Other commit types have no implicit release effect; if none of the rules
+  match, the release stops.
+
+The highest matching change wins. Types and optional scopes follow
+[Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
 
 Create only the local commit and tag:
 

@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/version.sh"
 
 usage() {
     cat <<'EOF'
-Usage: release.sh [OPTIONS] major|minor|patch
+Usage: release.sh [OPTIONS] major|minor|patch|auto
        release.sh --promote [OPTIONS]
 
 Options:
@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
             MOVING_TAGS=$2
             shift
             ;;
-        major|minor|patch)
+        major|minor|patch|auto)
             [[ -z "$BUMP" ]] || release_die "only one version bump may be specified"
             BUMP=$1
             ;;
@@ -81,6 +81,14 @@ if [[ -n "$LATEST_STABLE_TAG" ]]; then
     LATEST_STABLE_VERSION=$(release_version_from_tag "$LATEST_STABLE_TAG" "$TAG_PREFIX")
 fi
 
+EFFECTIVE_BUMP=$BUMP
+INFERRED_BUMP=false
+if ! $PROMOTE && [[ "$BUMP" == "auto" ]]; then
+    EFFECTIVE_BUMP=$(release_recommended_bump "$LATEST_STABLE_TAG") || \
+        release_die "no release-worthy Conventional Commits found since ${LATEST_STABLE_TAG:-the beginning}"
+    INFERRED_BUMP=true
+fi
+
 PACKAGE_VERSION=""
 if [[ -n "${RELEASE_GET_VERSION:-}" ]]; then
     PACKAGE_VERSION_RAW=$(bash -o pipefail -c "$RELEASE_GET_VERSION") || \
@@ -106,7 +114,7 @@ else
     if [[ -n "$PACKAGE_VERSION" && -n "$LATEST_STABLE_TAG" && "$PACKAGE_VERSION" != "$LATEST_STABLE_VERSION" ]]; then
         release_die "package version ${PACKAGE_VERSION} does not match latest tag ${LATEST_STABLE_VERSION}"
     fi
-    TARGET_VERSION=$(release_bump_version "$CURRENT_VERSION" "$BUMP") || \
+    TARGET_VERSION=$(release_bump_version "$CURRENT_VERSION" "$EFFECTIVE_BUMP") || \
         release_die "cannot bump version: ${CURRENT_VERSION}"
     $PRE && TARGET_VERSION="${TARGET_VERSION}-rc.1"
     PREVIOUS_TAG=$LATEST_STABLE_TAG
@@ -125,12 +133,15 @@ export RELEASE_VERSION=$TARGET_VERSION
 export RELEASE_VERSION_PEP440
 RELEASE_VERSION_PEP440=$(release_pep440_version "$TARGET_VERSION")
 export RELEASE_TAG=$TAG
-export RELEASE_BUMP=${BUMP:-promote}
+export RELEASE_BUMP=${EFFECTIVE_BUMP:-promote}
 export RELEASE_MOVING_TAGS=$MOVING_TAGS
 
 release_info "Release plan"
 release_info "  Branch:  ${RELEASE_BRANCH}"
 release_info "  Current: ${CURRENT_VERSION}"
+if $INFERRED_BUMP; then
+    release_info "  Bump:    ${EFFECTIVE_BUMP} (Conventional Commits)"
+fi
 release_info "  Target:  ${TARGET_VERSION}"
 release_info "  Tag:     ${TAG}"
 if [[ -n "$MOVING_TAG_OUTPUT" ]]; then
