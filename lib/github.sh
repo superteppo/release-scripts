@@ -40,7 +40,12 @@ NOTES=${NOTES:-$ROOT/.git/release-notes-${SAFE_TAG}.md}
 git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null || release_die "tag not found: $TAG"
 
 release_expand_artifacts
-git push
+BRANCH=$(git symbolic-ref --quiet --short HEAD) || release_die "releases must be published from a branch"
+if git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
+    git push
+else
+    git push --set-upstream origin "$BRANCH"
+fi
 git push origin "$TAG"
 
 if gh release view "$TAG" >/dev/null 2>&1; then

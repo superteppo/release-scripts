@@ -69,7 +69,6 @@ git rev-parse -q --verify refs/tags/v1.3.0 >/dev/null || fail "promoted tag was 
 
 git init -q --bare "$REMOTE"
 git remote add origin "$REMOTE"
-git push -q -u origin main
 
 MOCK_BIN="$TMP_ROOT/bin"
 GH_LOG="$TMP_ROOT/gh.log"
@@ -83,6 +82,7 @@ printf '%s\n' '#!/usr/bin/env bash' \
     'printf "%s\n" "$*" >> "$GH_LOG"' > "$apply_mock"
 chmod +x "$apply_mock"
 PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/github.sh" v1.3.0 >/dev/null
+assert_eq "$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')" "origin/main"
 assert_file_contains "$GH_LOG" "release create v1.3.0"
 assert_file_contains "$GH_LOG" "--verify-tag"
 
