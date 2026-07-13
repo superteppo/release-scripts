@@ -59,6 +59,12 @@ ROOT=$(release_project_root)
 cd "$ROOT"
 [[ -z "$(git status --porcelain)" ]] || release_die "working tree is not clean"
 
+if $PUBLISH; then
+    release_require_command gh
+    gh auth status >/dev/null 2>&1 || release_die "GitHub CLI is not authenticated; run: gh auth login"
+    git remote get-url origin >/dev/null 2>&1 || release_die "origin remote is not configured"
+fi
+
 TAG_PREFIX=${RELEASE_TAG_PREFIX-v}
 LATEST_STABLE_TAG=$(release_latest_stable_tag "$TAG_PREFIX" || true)
 LATEST_STABLE_VERSION="0.0.0"

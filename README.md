@@ -17,13 +17,13 @@ Add the remote task catalog to the target project's `mise.toml`:
 ```toml
 [task_config]
 includes = [
-  "git::https://github.com/superteppo/release-scripts.git//mise-tasks?ref=v1"
+  "git::https://github.com/superteppo/release-scripts.git//mise-tasks?ref=main"
 ]
 ```
 
-Pin a tag such as `v1` for stable updates. Use `ref=main` only when immediate
-changes are wanted. mise caches remote tasks; run `mise cache clear` to refresh
-them immediately.
+This tracks toolkit updates without copying scripts. For reproducible builds,
+replace `main` with an exact release such as `v1.0.0`. mise caches remote tasks;
+run `mise cache clear` to refresh them immediately.
 
 Check the setup:
 
@@ -90,10 +90,10 @@ mise run release --promote
 mise run release --dry-run patch
 ```
 
-The task checks versions, runs configured checks and builds, verifies artifacts,
-updates `CHANGELOG.md`, creates a release commit and annotated tag, pushes them,
-then creates the GitHub Release with `gh`. Release assets are replaced safely
-when GitHub publishing is retried.
+The task checks dependencies, GitHub authentication, versions, configured
+checks, builds, and artifacts. It then updates `CHANGELOG.md`, creates a release
+commit and annotated tag, pushes them, and creates the GitHub Release with `gh`.
+Release assets are replaced safely when GitHub publishing is retried.
 
 Create only the local commit and tag:
 

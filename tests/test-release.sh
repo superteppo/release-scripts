@@ -55,7 +55,7 @@ assert_file_contains CHANGELOG.md "## 1.2.4 -"
 assert_eq "$(git log -1 --pretty=%s)" "chore(release): v1.2.4"
 
 BEFORE=$(git rev-parse HEAD)
-PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run minor)
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run minor)
 assert_file_contains <(printf '%s\n' "$PLAN") "Target:  1.3.0"
 assert_eq "$(git rev-parse HEAD)" "$BEFORE"
 
@@ -120,6 +120,11 @@ git rev-parse -q --verify refs/tags/v0.0.1 >/dev/null 2>&1 && fail "failed check
 unset RELEASE_CHECK_COMMAND
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null
 git rev-parse -q --verify refs/tags/v0.0.1 >/dev/null || fail "tag-only release was not created"
+
+# Publishing preflight is part of the normal release command.
+if PATH="/usr/bin:/bin" "$REPOSITORY_ROOT/lib/release.sh" --dry-run patch >/dev/null 2>&1; then
+    fail "publishing without gh should fail preflight"
+fi
 
 printf 'dirty\n' >> README.md
 if "$REPOSITORY_ROOT/lib/release.sh" --dry-run patch >/dev/null 2>&1; then
