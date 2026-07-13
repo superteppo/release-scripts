@@ -102,12 +102,18 @@ Set reusable defaults in the target project's existing `mise.toml`:
 ```toml
 [env]
 RELEASE_MOVING_TAGS = "major minor"
+RELEASE_BRANCH_PATTERN = "main|release/.+|fix/.+"
 RELEASE_CHECK_COMMAND = "mise run test"
 RELEASE_BUILD_COMMAND = "mise run build"
 RELEASE_ARTIFACTS = "dist/*.zip"
 ```
 
 Command-line options override the corresponding mise default.
+
+By default, releases are allowed only from GitHub's default branch. Set
+`RELEASE_BRANCH_PATTERN` to an extended regular expression when dedicated
+release or fix branches are also allowed. The expression must match the entire
+branch name.
 
 ## Release
 
@@ -148,6 +154,7 @@ mise run release:github v1.2.3
 | `RELEASE_ARTIFACTS` | none | Space-separated artifact globs |
 | `RELEASE_TAG_PREFIX` | `v` | Prefix for release tags; may be empty |
 | `RELEASE_MOVING_TAGS` | none | Moving stable aliases: `major`, `minor`, or both |
+| `RELEASE_BRANCH_PATTERN` | default branch | Allowed release branch regex |
 | `RELEASE_CHANGELOG` | `CHANGELOG.md` | Changelog path; use `false` to disable |
 
 The configured commands are executed as trusted Bash. Artifact filenames may

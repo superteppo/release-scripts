@@ -52,6 +52,7 @@ export RELEASE_BUILD_COMMAND='mkdir -p dist && printf artifact > dist/app.tgz'
 export RELEASE_ARTIFACTS='dist/*.tgz'
 export RELEASE_TAG_PREFIX='v'
 export RELEASE_MOVING_TAGS='major minor'
+export RELEASE_BRANCH_PATTERN='main'
 
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null
 assert_eq "$(cat VERSION)" "1.2.4"
@@ -120,6 +121,7 @@ printf 'example\n' > README.md
 git add README.md
 git commit -q -m "Initial project"
 unset RELEASE_GET_VERSION RELEASE_SET_VERSION RELEASE_CHECK_COMMAND RELEASE_BUILD_COMMAND RELEASE_MOVING_TAGS
+export RELEASE_BRANCH_PATTERN='main'
 export RELEASE_CHANGELOG=false
 export RELEASE_ARTIFACTS='missing/*.zip'
 if "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null 2>&1; then
@@ -146,6 +148,37 @@ fi
 printf 'dirty\n' >> README.md
 if "$REPOSITORY_ROOT/lib/release.sh" --dry-run patch >/dev/null 2>&1; then
     fail "dirty working tree should stop a release"
+fi
+
+# Default-branch enforcement and explicit release-branch patterns.
+BRANCH_PROJECT="$TMP_ROOT/branches"
+BRANCH_REMOTE="$TMP_ROOT/branches.git"
+git init -q --bare "$BRANCH_REMOTE"
+git --git-dir="$BRANCH_REMOTE" symbolic-ref HEAD refs/heads/main
+mkdir -p "$BRANCH_PROJECT"
+cd "$BRANCH_PROJECT"
+git init -q
+git checkout -q -b main
+git config user.name "Release Tests"
+git config user.email "release-tests@example.invalid"
+printf 'example\n' > README.md
+git add README.md
+git commit -q -m "Initial project"
+git remote add origin "$BRANCH_REMOTE"
+git push -q -u origin main
+git remote set-head origin -a >/dev/null
+unset RELEASE_BRANCH_PATTERN
+"$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run patch >/dev/null
+
+git checkout -q -b feature/test
+if "$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run patch >/dev/null 2>&1; then
+    fail "non-default branch should stop a release"
+fi
+export RELEASE_BRANCH_PATTERN='main|feature/.+'
+"$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run patch >/dev/null
+export RELEASE_BRANCH_PATTERN='('
+if "$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run patch >/dev/null 2>&1; then
+    fail "invalid release branch regex was accepted"
 fi
 
 printf 'All release tests passed.\n'

@@ -34,6 +34,13 @@ else
     failed=true
 fi
 
+if branch=$(release_assert_branch 2>/dev/null); then
+    printf 'ok  release branch: %s\n' "$branch"
+else
+    printf 'ERR current branch is not eligible for releases\n' >&2
+    failed=true
+fi
+
 if [[ -n "${RELEASE_GET_VERSION:-}" ]]; then
     if version=$(bash -o pipefail -c "$RELEASE_GET_VERSION" 2>/dev/null); then
         printf 'ok  package version: %s\n' "$(release_trim "$version")"

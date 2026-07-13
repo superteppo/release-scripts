@@ -72,6 +72,7 @@ if $PUBLISH; then
     gh auth status >/dev/null 2>&1 || release_die "GitHub CLI is not authenticated; run: gh auth login"
     git remote get-url origin >/dev/null 2>&1 || release_die "origin remote is not configured"
 fi
+RELEASE_BRANCH=$(release_assert_branch)
 
 TAG_PREFIX=${RELEASE_TAG_PREFIX-v}
 LATEST_STABLE_TAG=$(release_latest_stable_tag "$TAG_PREFIX" || true)
@@ -128,6 +129,7 @@ export RELEASE_BUMP=${BUMP:-promote}
 export RELEASE_MOVING_TAGS=$MOVING_TAGS
 
 release_info "Release plan"
+release_info "  Branch:  ${RELEASE_BRANCH}"
 release_info "  Current: ${CURRENT_VERSION}"
 release_info "  Target:  ${TARGET_VERSION}"
 release_info "  Tag:     ${TAG}"

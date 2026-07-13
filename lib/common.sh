@@ -17,6 +17,59 @@ release_project_root() {
     git rev-parse --show-toplevel 2>/dev/null || release_die "not inside a Git repository"
 }
 
+release_current_branch() {
+    git symbolic-ref --quiet --short HEAD 2>/dev/null || \
+        release_die "releases cannot be created from a detached HEAD"
+}
+
+release_default_branch() {
+    local ref branch
+    ref=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null || true)
+    if [[ -n "$ref" ]]; then
+        printf '%s\n' "${ref#refs/remotes/origin/}"
+        return 0
+    fi
+
+    branch=$(git ls-remote --symref origin HEAD 2>/dev/null | \
+        sed -n 's/^ref: refs\/heads\/\([^[:space:]]*\)[[:space:]]*HEAD$/\1/p' | head -1) || true
+    if [[ -n "$branch" ]]; then
+        printf '%s\n' "$branch"
+        return 0
+    fi
+
+    if command -v gh >/dev/null 2>&1 && git remote get-url origin >/dev/null 2>&1; then
+        branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)
+        if [[ -n "$branch" ]]; then
+            printf '%s\n' "$branch"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+release_assert_branch() {
+    local branch pattern regex default_branch
+    branch=$(release_current_branch)
+    pattern=${RELEASE_BRANCH_PATTERN:-}
+
+    if [[ -n "$pattern" ]]; then
+        regex="^(${pattern})$"
+        if [[ "$branch" =~ $regex ]]; then
+            printf '%s\n' "$branch"
+            return 0
+        else
+            release_die "branch '$branch' does not match RELEASE_BRANCH_PATTERN: $pattern"
+        fi
+    fi
+
+    default_branch=$(release_default_branch) || \
+        release_die "cannot determine the default branch; set RELEASE_BRANCH_PATTERN explicitly"
+    [[ "$branch" == "$default_branch" ]] || \
+        release_die "releases must be created from the default branch '$default_branch' (current: '$branch')"
+    printf '%s\n' "$branch"
+}
+
 release_require_command() {
     command -v "$1" >/dev/null 2>&1 || release_die "required command not found: $1"
 }
