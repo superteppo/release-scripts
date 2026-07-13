@@ -31,6 +31,21 @@ Check the setup:
 mise run release:doctor
 ```
 
+### Install with Claude Code or Codex
+
+Paste this into the coding agent while it is working in the target repository:
+
+```text
+Add the release task catalog from
+https://github.com/superteppo/release-scripts to this project. Preserve the
+existing mise.toml and add its remote mise-tasks directory from ref=main to
+task_config.includes. Configure RELEASE_GET_VERSION and RELEASE_SET_VERSION
+for the package manager already used by this project; use tag-only versioning
+if its version is VCS-derived. Add the existing test/build commands and release
+artifact globs as mise environment variables. Run `mise run release:doctor`,
+but do not create a release. Keep the changes minimal.
+```
+
 ## Configure version ownership
 
 The release task calculates an exact version and exports:
@@ -51,6 +66,7 @@ RELEASE_SET_VERSION = "npm version --no-git-tag-version --ignore-scripts \"$RELE
 RELEASE_CHECK_COMMAND = "npm test"
 RELEASE_BUILD_COMMAND = "npm run build"
 RELEASE_ARTIFACTS = "dist/*.tgz"
+RELEASE_MOVING_TAGS = "major minor"
 ```
 
 ### Poetry
@@ -79,6 +95,20 @@ For VCS-derived versions, omit both version commands. Git tags then remain the
 only version source. Custom and monorepo workflows can use any commands that
 obey the same get/set contract.
 
+## Project defaults
+
+Set reusable defaults in the target project's existing `mise.toml`:
+
+```toml
+[env]
+RELEASE_MOVING_TAGS = "major minor"
+RELEASE_CHECK_COMMAND = "mise run test"
+RELEASE_BUILD_COMMAND = "mise run build"
+RELEASE_ARTIFACTS = "dist/*.zip"
+```
+
+Command-line options override the corresponding mise default.
+
 ## Release
 
 ```console
@@ -88,12 +118,17 @@ mise run release major
 mise run release --pre minor
 mise run release --promote
 mise run release --dry-run patch
+mise run release --moving-tags major,minor patch
 ```
 
 The task checks dependencies, GitHub authentication, versions, configured
 checks, builds, and artifacts. It then updates `CHANGELOG.md`, creates a release
 commit and annotated tag, pushes them, and creates the GitHub Release with `gh`.
 Release assets are replaced safely when GitHub publishing is retried.
+
+Moving tags are optional. For a stable `v2.3.0` release, `major minor` updates
+`v2` and `v2.3` to the same commit. They are force-updated atomically with the
+immutable release tag. Prereleases never move these aliases.
 
 Create only the local commit and tag:
 
@@ -112,6 +147,7 @@ mise run release:github v1.2.3
 | `RELEASE_BUILD_COMMAND` | none | Build release artifacts |
 | `RELEASE_ARTIFACTS` | none | Space-separated artifact globs |
 | `RELEASE_TAG_PREFIX` | `v` | Prefix for release tags; may be empty |
+| `RELEASE_MOVING_TAGS` | none | Moving stable aliases: `major`, `minor`, or both |
 | `RELEASE_CHANGELOG` | `CHANGELOG.md` | Changelog path; use `false` to disable |
 
 The configured commands are executed as trusted Bash. Artifact filenames may
@@ -122,7 +158,8 @@ contain spaces, but the glob patterns themselves may not.
 - Before a tag is created: inspect or revert changes made by the configured
   version/build commands, then rerun from a clean tree.
 - After a tag is created: retry only publication with
-  `mise run release:github <tag>`.
+  `mise run release:github <tag>`. If moving tags were supplied only on the
+  command line, repeat `--moving-tags major,minor` during the retry.
 - Inspect the next operation without changes using `--dry-run`.
 
 ## Optional Dropbox publishing
@@ -139,6 +176,23 @@ Add a configured `.dropboxuploader` file, then run:
 
 ```console
 mise run release:dropbox
+```
+
+## Development
+
+Install the local safeguard once:
+
+```console
+pre-commit install
+```
+
+It runs Bash syntax checks, ShellCheck, integration tests, and whitespace
+validation before every commit. Run the same gate manually with:
+
+```console
+tests/check.sh
+# or
+pre-commit run --all-files
 ```
 
 ## License and acknowledgements

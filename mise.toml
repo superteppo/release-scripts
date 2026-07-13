@@ -1,0 +1,2 @@
+[env]
+RELEASE_MOVING_TAGS = "major minor"

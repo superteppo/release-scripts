@@ -69,3 +69,29 @@ release_latest_prerelease_tag() {
     done < <(git tag --list --sort=-version:refname)
     return 1
 }
+
+release_moving_tags() {
+    local version=$1
+    local prefix=$2
+    local levels=${3//,/ }
+    local major minor level
+
+    for level in $levels; do
+        case "$level" in
+            major|minor|none) ;;
+            *) return 1 ;;
+        esac
+    done
+
+    [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 0
+    major=${BASH_REMATCH[1]}
+    minor=${BASH_REMATCH[2]}
+
+    for level in $levels; do
+        case "$level" in
+            major) printf '%s%s\n' "$prefix" "$major" ;;
+            minor) printf '%s%s.%s\n' "$prefix" "$major" "$minor" ;;
+            none) ;;
+        esac
+    done
+}

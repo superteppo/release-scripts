@@ -17,6 +17,8 @@ Options:
   --promote      promote the latest rc tag to a stable release
   --dry-run      show the release plan without changing anything
   --no-publish   create the local commit and tag without pushing
+  --moving-tags LEVELS
+                 update moving stable tags: major, minor, or major,minor
   -h, --help     show this help
 EOF
 }
@@ -26,6 +28,7 @@ PROMOTE=false
 DRY_RUN=false
 PUBLISH=true
 BUMP=""
+MOVING_TAGS=${RELEASE_MOVING_TAGS:-}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -33,6 +36,11 @@ while [[ $# -gt 0 ]]; do
         --promote) PROMOTE=true ;;
         --dry-run) DRY_RUN=true ;;
         --no-publish) PUBLISH=false ;;
+        --moving-tags)
+            [[ $# -ge 2 ]] || release_die "--moving-tags requires a value"
+            MOVING_TAGS=$2
+            shift
+            ;;
         major|minor|patch)
             [[ -z "$BUMP" ]] || release_die "only one version bump may be specified"
             BUMP=$1
@@ -105,17 +113,29 @@ fi
 
 TAG="${TAG_PREFIX}${TARGET_VERSION}"
 git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null && release_die "tag already exists: ${TAG}"
+MOVING_TAG_NAMES=()
+MOVING_TAG_OUTPUT=$(release_moving_tags "$TARGET_VERSION" "$TAG_PREFIX" "$MOVING_TAGS") || \
+    release_die "RELEASE_MOVING_TAGS must contain only major and/or minor"
+while IFS= read -r moving_tag; do
+    [[ -n "$moving_tag" ]] && MOVING_TAG_NAMES+=("$moving_tag")
+done <<< "$MOVING_TAG_OUTPUT"
 
 export RELEASE_VERSION=$TARGET_VERSION
 export RELEASE_VERSION_PEP440
 RELEASE_VERSION_PEP440=$(release_pep440_version "$TARGET_VERSION")
 export RELEASE_TAG=$TAG
 export RELEASE_BUMP=${BUMP:-promote}
+export RELEASE_MOVING_TAGS=$MOVING_TAGS
 
 release_info "Release plan"
 release_info "  Current: ${CURRENT_VERSION}"
 release_info "  Target:  ${TARGET_VERSION}"
 release_info "  Tag:     ${TAG}"
+if [[ -n "$MOVING_TAG_OUTPUT" ]]; then
+    release_info "  Moving:  ${MOVING_TAG_NAMES[*]}"
+elif [[ -n "$MOVING_TAGS" && "$TARGET_VERSION" == *-rc.* ]]; then
+    release_info "  Moving:  skipped for prerelease"
+fi
 release_info "  Publish: ${PUBLISH}"
 
 if $DRY_RUN; then
@@ -157,6 +177,12 @@ fi
 
 git tag -a "$TAG" -m "$TAG"
 release_info "Created ${TAG}"
+if [[ -n "$MOVING_TAG_OUTPUT" ]]; then
+    for moving_tag in "${MOVING_TAG_NAMES[@]}"; do
+        git tag -fa "$moving_tag" "${TAG}^{}" -m "${moving_tag} -> ${TAG}"
+        release_info "Updated ${moving_tag} -> ${TAG}"
+    done
+fi
 
 if $PUBLISH; then
     github_args=("$TAG" "$NOTES_FILE")

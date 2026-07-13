@@ -23,6 +23,10 @@ assert_eq "$(release_bump_version 1.2.3 minor)" "1.3.0"
 assert_eq "$(release_bump_version 1.2.3 patch)" "1.2.4"
 assert_eq "$(release_normalize_version 1.3.0rc2)" "1.3.0-rc.2"
 assert_eq "$(release_pep440_version 1.3.0-rc.2)" "1.3.0rc2"
+assert_eq "$(release_moving_tags 2.3.4 v 'major minor')" $'v2\nv2.3'
+if release_moving_tags 2.3.4 v invalid >/dev/null; then
+    fail "invalid moving tag level was accepted"
+fi
 
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/release-tests.XXXXXX")
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -47,10 +51,13 @@ export RELEASE_CHECK_COMMAND='test -s VERSION'
 export RELEASE_BUILD_COMMAND='mkdir -p dist && printf artifact > dist/app.tgz'
 export RELEASE_ARTIFACTS='dist/*.tgz'
 export RELEASE_TAG_PREFIX='v'
+export RELEASE_MOVING_TAGS='major minor'
 
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null
 assert_eq "$(cat VERSION)" "1.2.4"
 git rev-parse -q --verify refs/tags/v1.2.4 >/dev/null || fail "stable tag was not created"
+assert_eq "$(git rev-parse 'v1^{}')" "$(git rev-parse 'v1.2.4^{}')"
+assert_eq "$(git rev-parse 'v1.2^{}')" "$(git rev-parse 'v1.2.4^{}')"
 assert_file_contains CHANGELOG.md "## 1.2.4 -"
 assert_eq "$(git log -1 --pretty=%s)" "chore(release): v1.2.4"
 
@@ -62,10 +69,13 @@ assert_eq "$(git rev-parse HEAD)" "$BEFORE"
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish --pre minor >/dev/null
 assert_eq "$(cat VERSION)" "1.3.0-rc.1"
 git rev-parse -q --verify refs/tags/v1.3.0-rc.1 >/dev/null || fail "prerelease tag was not created"
+assert_eq "$(git rev-parse 'v1^{}')" "$(git rev-parse 'v1.2.4^{}')"
 
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish --promote >/dev/null
 assert_eq "$(cat VERSION)" "1.3.0"
 git rev-parse -q --verify refs/tags/v1.3.0 >/dev/null || fail "promoted tag was not created"
+assert_eq "$(git rev-parse 'v1^{}')" "$(git rev-parse 'v1.3.0^{}')"
+assert_eq "$(git rev-parse 'v1.3^{}')" "$(git rev-parse 'v1.3.0^{}')"
 
 git init -q --bare "$REMOTE"
 git remote add origin "$REMOTE"
@@ -83,6 +93,8 @@ printf '%s\n' '#!/usr/bin/env bash' \
 chmod +x "$apply_mock"
 PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/github.sh" v1.3.0 >/dev/null
 assert_eq "$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}')" "origin/main"
+assert_eq "$(git --git-dir="$REMOTE" rev-parse 'v1^{}')" "$(git rev-parse 'v1.3.0^{}')"
+assert_eq "$(git --git-dir="$REMOTE" rev-parse 'v1.3^{}')" "$(git rev-parse 'v1.3.0^{}')"
 assert_file_contains "$GH_LOG" "release create v1.3.0"
 assert_file_contains "$GH_LOG" "--verify-tag"
 
@@ -90,6 +102,11 @@ GH_RELEASE_EXISTS=true PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/github.sh" v
 assert_file_contains "$GH_LOG" "release edit v1.3.0"
 assert_file_contains "$GH_LOG" "release upload v1.3.0"
 assert_file_contains "$GH_LOG" "--clobber"
+
+# Retrying an older release must never move aliases backward.
+unset RELEASE_MOVING_TAGS
+PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/github.sh" v1.2.4 --moving-tags major,minor >/dev/null
+assert_eq "$(git --git-dir="$REMOTE" rev-parse 'v1^{}')" "$(git rev-parse 'v1.3.0^{}')"
 
 # Tag-only projects need no package-manager configuration.
 TAG_PROJECT="$TMP_ROOT/tag-only"
@@ -102,7 +119,7 @@ git config user.email "release-tests@example.invalid"
 printf 'example\n' > README.md
 git add README.md
 git commit -q -m "Initial project"
-unset RELEASE_GET_VERSION RELEASE_SET_VERSION RELEASE_CHECK_COMMAND RELEASE_BUILD_COMMAND
+unset RELEASE_GET_VERSION RELEASE_SET_VERSION RELEASE_CHECK_COMMAND RELEASE_BUILD_COMMAND RELEASE_MOVING_TAGS
 export RELEASE_CHANGELOG=false
 export RELEASE_ARTIFACTS='missing/*.zip'
 if "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null 2>&1; then
