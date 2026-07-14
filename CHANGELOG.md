@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 - 2026-07-14
+
+- feat: add release workflow and diagnostics (`689e40b`)
+
 ## 1.3.0 - 2026-07-14
 
 - feat: improve release integration safeguards (`74d6deb`)
