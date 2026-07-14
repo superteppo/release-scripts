@@ -132,9 +132,16 @@ assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "moving tags: major minor
 if GH_REPO_CAN_PUSH=false PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
     fail "doctor accepted read-only GitHub repository access"
 fi
+DOCTOR_OUTPUT=$(GITHUB_ACTIONS=true GH_REPO_CAN_PUSH=false PATH="$MOCK_BIN:$PATH" \
+    "$REPOSITORY_ROOT/lib/doctor.sh" 2>&1)
+assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "WRITE (Actions Git dry-run)"
 if GH_REPO_INACCESSIBLE=true PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
     fail "doctor accepted GitHub authentication without repository access"
 fi
+DOCTOR_OUTPUT=$(GH_REPO_INACCESSIBLE=true PATH="$MOCK_BIN:$PATH" \
+    "$REPOSITORY_ROOT/lib/doctor.sh" 2>&1 || true)
+assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") \
+    "Release readiness checks failed; resolve the ERR lines above."
 
 export RELEASE_MOVING_TAGS=invalid
 if PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then

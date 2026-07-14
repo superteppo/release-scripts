@@ -76,6 +76,10 @@ if $gh_authenticated && $origin_configured; then
        [[ -n "$can_push" ]]; then
         if [[ "$can_push" == "true" ]]; then
             printf 'ok  GitHub repository permission: WRITE\n'
+        elif [[ "${GITHUB_ACTIONS:-}" == "true" ]] && \
+             push_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) && \
+             git push --dry-run origin "HEAD:refs/heads/${push_branch}" >/dev/null 2>&1; then
+            printf 'ok  GitHub repository permission: WRITE (Actions Git dry-run)\n'
         else
             printf 'ERR GitHub repository permission is read-only; WRITE is required\n' >&2
             failed=true
@@ -182,7 +186,10 @@ if [[ -n "${RELEASE_DROPBOX_PATH:-}" || -n "${RELEASE_DROPBOX_CONFIG:-}" || -e "
     fi
 fi
 
-$failed && exit 1
+if $failed; then
+    printf 'Release readiness checks failed; resolve the ERR lines above.\n' >&2
+    exit 1
+fi
 if $warnings; then
     printf 'Ready to release with warnings.\n'
 else
