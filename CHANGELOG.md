@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1 - 2026-07-14
+
+- fix: verify Actions write access with Git (`ace695c`)
+- fix: support Actions repository tokens in doctor (`edc06a4`)
+- fix: verify repository access before release (`fbd2135`)
+
 ## 1.4.0 - 2026-07-14
 
 - feat: add release workflow and diagnostics (`689e40b`)
