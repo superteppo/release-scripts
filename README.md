@@ -27,11 +27,12 @@ includes = [
 ```
 
 Setting `task_config.includes` replaces mise's default task directories. The
-local entries above keep existing file tasks discoverable; remove only the
-directories the target project does not use.
+local entries above keep existing and future file tasks discoverable. Keep them
+even when their directories are empty; remove one only when deliberately
+disabling that task directory.
 
 This tracks toolkit updates without copying scripts. For reproducible builds,
-replace `main` with an exact release such as `v1.0.0`. mise caches remote tasks;
+replace `main` with an exact release such as `v1.4.0`. mise caches remote tasks;
 run `mise cache clear` to refresh them immediately.
 
 Check the setup:
@@ -65,6 +66,9 @@ The release task calculates an exact version and exports:
 
 Configure commands that read and set that exact version. Configure both or
 neither.
+
+Pin the release toolchain under `[tools]` or in mise-supported version files so
+the same command versions are used locally and in CI.
 
 ### npm
 
@@ -113,8 +117,9 @@ Set reusable defaults in the target project's existing `mise.toml`:
 [env]
 RELEASE_MOVING_TAGS = "major minor"
 RELEASE_BRANCH_PATTERN = "main|release/.+|fix/.+"
-RELEASE_CHECK_COMMAND = "mise run test"
-RELEASE_BUILD_COMMAND = "mise run build"
+# Replace these examples with commands and artifacts provided by the project.
+RELEASE_CHECK_COMMAND = "node --test"
+RELEASE_BUILD_COMMAND = "npm run build"
 RELEASE_ARTIFACTS = "dist/*.zip"
 ```
 

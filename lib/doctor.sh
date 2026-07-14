@@ -12,6 +12,8 @@ cd "$ROOT"
 
 failed=false
 warnings=false
+gh_authenticated=false
+origin_configured=false
 
 doctor_warn() {
     printf 'WARN %s\n' "$*" >&2
@@ -53,7 +55,8 @@ done
 
 if command -v gh >/dev/null 2>&1; then
     if gh auth status >/dev/null 2>&1; then
-        printf 'ok  GitHub authentication\n'
+        printf 'ok  GitHub CLI authentication\n'
+        gh_authenticated=true
     else
         printf 'ERR GitHub CLI is not authenticated\n' >&2
         failed=true
@@ -62,9 +65,28 @@ fi
 
 if git remote get-url origin >/dev/null 2>&1; then
     printf 'ok  origin: %s\n' "$(git remote get-url origin)"
+    origin_configured=true
 else
     printf 'ERR origin remote is not configured\n' >&2
     failed=true
+fi
+
+if $gh_authenticated && $origin_configured; then
+    if permission=$(gh repo view --json viewerPermission --jq '.viewerPermission' 2>/dev/null) && \
+       [[ -n "$permission" ]]; then
+        case "$permission" in
+            WRITE|MAINTAIN|ADMIN)
+                printf 'ok  GitHub repository permission: %s\n' "$permission"
+                ;;
+            *)
+                printf 'ERR GitHub repository permission is %s; WRITE is required\n' "$permission" >&2
+                failed=true
+                ;;
+        esac
+    else
+        printf 'ERR authenticated GitHub account cannot access the origin repository\n' >&2
+        failed=true
+    fi
 fi
 
 if branch=$(release_assert_branch 2>/dev/null); then

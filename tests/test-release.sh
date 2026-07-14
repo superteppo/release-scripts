@@ -94,6 +94,12 @@ apply_mock="$MOCK_BIN/gh"
 # These variables are expanded when the generated mock runs.
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' \
+    'if [[ "$1 $2" == "auth status" ]]; then exit 0; fi' \
+    'if [[ "$1 $2" == "repo view" ]]; then' \
+    '  [[ "${GH_REPO_INACCESSIBLE:-}" == true ]] && exit 1' \
+    '  printf "%s\n" "${GH_REPO_PERMISSION:-WRITE}"' \
+    '  exit 0' \
+    'fi' \
     'if [[ "$1 $2" == "release view" ]]; then [[ "${GH_RELEASE_EXISTS:-}" == true ]] && exit 0 || exit 1; fi' \
     'printf "%s\n" "$*" >> "$GH_LOG"' > "$apply_mock"
 chmod +x "$apply_mock"
@@ -119,8 +125,16 @@ git tag -a 9.9.9 -m 9.9.9
 export RELEASE_MOVING_TAGS='major minor'
 DOCTOR_OUTPUT=$(PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" 2>&1)
 assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "does not match RELEASE_TAG_PREFIX"
+assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "GitHub repository permission: WRITE"
 assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "cfg RELEASE_CHECK_COMMAND: test -s VERSION"
 assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "moving tags: major minor (current aliases: v1 v1.3)"
+
+if GH_REPO_PERMISSION=READ PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
+    fail "doctor accepted read-only GitHub repository access"
+fi
+if GH_REPO_INACCESSIBLE=true PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
+    fail "doctor accepted GitHub authentication without repository access"
+fi
 
 export RELEASE_MOVING_TAGS=invalid
 if PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
