@@ -116,8 +116,17 @@ assert_eq "$(git --git-dir="$REMOTE" rev-parse 'v1^{}')" "$(git rev-parse 'v1.3.
 
 # Doctor reports configuration mismatches before a release mutates anything.
 git tag -a 9.9.9 -m 9.9.9
+export RELEASE_MOVING_TAGS='major minor'
 DOCTOR_OUTPUT=$(PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" 2>&1)
 assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "does not match RELEASE_TAG_PREFIX"
+assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "cfg RELEASE_CHECK_COMMAND: test -s VERSION"
+assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "moving tags: major minor (current aliases: v1 v1.3)"
+
+export RELEASE_MOVING_TAGS=invalid
+if PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
+    fail "doctor accepted invalid moving tags"
+fi
+export RELEASE_MOVING_TAGS='major minor'
 
 export RELEASE_ARTIFACTS='missing/*.zip'
 DOCTOR_OUTPUT=$(PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" 2>&1)

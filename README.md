@@ -161,6 +161,44 @@ Use `auto` to inspect commit messages from the latest stable `X.Y.Z` tag through
 
 The highest matching change wins. Types and optional scopes follow
 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+For predictable `auto` releases, adopt Conventional Commits for every
+release-worthy change and enforce the format with a commit-message check or CI.
+
+### Recommended safeguards
+
+Use [pre-commit](https://pre-commit.com/) for fast, project-specific checks
+before changes enter release history:
+
+```console
+pre-commit install
+pre-commit run --all-files
+```
+
+Keep the hook configuration in the target repository. Pre-commit complements
+`RELEASE_CHECK_COMMAND`; the latter remains the authoritative release gate.
+
+### GitHub Actions
+
+Use [the included workflow](.github/workflows/github-actions-release.yaml). It
+runs only when manually dispatched, defaults to a Conventional Commits `auto`
+bump, and creates the commit, tags, and GitHub Release without manual tag
+creation:
+
+```console
+gh workflow run github-actions-release.yaml -f bump=auto
+```
+
+The workflow checks out the default branch with complete commit/tag history for
+version inference and changelogs. `filter: blob:none` avoids eagerly downloading
+historical file contents. Pin the remote task catalog in `mise.toml` to the exact
+toolkit release used by CI, for example `ref=v1.3.0`, instead of `ref=main`.
+
+The default `GITHUB_TOKEN` needs `contents: write`. Its pushes and releases do
+not trigger ordinary downstream workflows. If package publishing depends on a
+`push` or `release` workflow, use a suitably restricted GitHub App token or PAT
+for both the checkout `token` and `GH_TOKEN`. Repository rules must also permit
+the release commit and immutable/moving tag updates; signed-commit or protected
+tag requirements may need repository-specific configuration.
 
 ### Changelog customization
 
@@ -188,6 +226,9 @@ RELEASE_TAG_PREFIX = ""
 ```
 
 When moving tags are enabled, their names likewise become `X` and `X.Y`.
+For repositories that publish a GitHub Action, prefer
+`RELEASE_MOVING_TAGS = "major"` so consumers can use a stable alias such as
+`owner/action@v1`.
 
 Create only the local commit and tag:
 

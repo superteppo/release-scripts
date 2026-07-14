@@ -23,6 +23,7 @@ doctor_check_hook() {
     local value=$2
     local first
     [[ -n "$value" ]] || return 0
+    printf 'cfg %s: %s\n' "$name" "$value"
     if ! bash -n -c "$value" >/dev/null 2>&1; then
         printf 'ERR %s has invalid Bash syntax\n' "$name" >&2
         failed=true
@@ -92,6 +93,22 @@ else
 fi
 if [[ -n "$INCOMPATIBLE_TAG" ]]; then
     doctor_warn "existing tag '$INCOMPATIBLE_TAG' does not match RELEASE_TAG_PREFIX='${TAG_PREFIX}'"
+fi
+
+MOVING_TAGS=${RELEASE_MOVING_TAGS:-}
+if [[ -z "$MOVING_TAGS" || "$MOVING_TAGS" == "none" ]]; then
+    printf 'ok  moving tags: disabled\n'
+else
+    MOVING_VERSION=0.0.0
+    [[ -z "$LATEST_TAG" ]] || MOVING_VERSION=$(release_version_from_tag "$LATEST_TAG" "$TAG_PREFIX")
+    if MOVING_TAG_OUTPUT=$(release_moving_tags "$MOVING_VERSION" "$TAG_PREFIX" "$MOVING_TAGS"); then
+        printf 'ok  moving tags: %s' "${MOVING_TAGS//,/ }"
+        [[ -z "$LATEST_TAG" ]] || printf ' (current aliases: %s)' "$(printf '%s' "$MOVING_TAG_OUTPUT" | paste -sd ' ' -)"
+        printf '\n'
+    else
+        printf 'ERR RELEASE_MOVING_TAGS must contain only major and/or minor\n' >&2
+        failed=true
+    fi
 fi
 
 if [[ -n "${RELEASE_GET_VERSION:-}" ]]; then

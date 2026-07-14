@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        default: auto
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_BUMP: ${{ inputs.bump }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: jdx/mise-action@v4
+
+      - name: Configure Git identity
+        env:
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          git config user.name "$RELEASE_ACTOR"
+          git config user.email \
+            "${RELEASE_ACTOR_ID}+${RELEASE_ACTOR}@users.noreply.github.com"
+
+      - name: Verify release
+        run: |
+          mise run release:doctor
+          mise run release --dry-run "$RELEASE_BUMP"
+
+      - name: Create release
+        run: mise run release "$RELEASE_BUMP"
