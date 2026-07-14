@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0 - 2026-07-14
+
+- feat: improve release integration safeguards (`74d6deb`)
+
 ## 1.2.0 - 2026-07-13
 
 - feat: infer version bumps from Conventional Commits (`22a1690`)
