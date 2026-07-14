@@ -72,17 +72,14 @@ else
 fi
 
 if $gh_authenticated && $origin_configured; then
-    if permission=$(gh repo view --json viewerPermission --jq '.viewerPermission' 2>/dev/null) && \
-       [[ -n "$permission" ]]; then
-        case "$permission" in
-            WRITE|MAINTAIN|ADMIN)
-                printf 'ok  GitHub repository permission: %s\n' "$permission"
-                ;;
-            *)
-                printf 'ERR GitHub repository permission is %s; WRITE is required\n' "$permission" >&2
-                failed=true
-                ;;
-        esac
+    if can_push=$(gh api 'repos/{owner}/{repo}' --jq '.permissions.push' 2>/dev/null) && \
+       [[ -n "$can_push" ]]; then
+        if [[ "$can_push" == "true" ]]; then
+            printf 'ok  GitHub repository permission: WRITE\n'
+        else
+            printf 'ERR GitHub repository permission is read-only; WRITE is required\n' >&2
+            failed=true
+        fi
     else
         printf 'ERR authenticated GitHub account cannot access the origin repository\n' >&2
         failed=true

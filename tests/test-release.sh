@@ -95,9 +95,9 @@ apply_mock="$MOCK_BIN/gh"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' \
     'if [[ "$1 $2" == "auth status" ]]; then exit 0; fi' \
-    'if [[ "$1 $2" == "repo view" ]]; then' \
+    'if [[ "$1 $2" == "api repos/{owner}/{repo}" ]]; then' \
     '  [[ "${GH_REPO_INACCESSIBLE:-}" == true ]] && exit 1' \
-    '  printf "%s\n" "${GH_REPO_PERMISSION:-WRITE}"' \
+    '  printf "%s\n" "${GH_REPO_CAN_PUSH:-true}"' \
     '  exit 0' \
     'fi' \
     'if [[ "$1 $2" == "release view" ]]; then [[ "${GH_RELEASE_EXISTS:-}" == true ]] && exit 0 || exit 1; fi' \
@@ -129,7 +129,7 @@ assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "GitHub repository permis
 assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "cfg RELEASE_CHECK_COMMAND: test -s VERSION"
 assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "moving tags: major minor (current aliases: v1 v1.3)"
 
-if GH_REPO_PERMISSION=READ PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
+if GH_REPO_CAN_PUSH=false PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
     fail "doctor accepted read-only GitHub repository access"
 fi
 if GH_REPO_INACCESSIBLE=true PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
