@@ -65,9 +65,11 @@ fi
 release_require_command git
 ROOT=$(release_project_root)
 cd "$ROOT"
-[[ -z "$(git status --porcelain)" ]] || release_die "working tree is not clean"
+if ! $DRY_RUN; then
+    [[ -z "$(git status --porcelain)" ]] || release_die "working tree is not clean"
+fi
 
-if $PUBLISH; then
+if $PUBLISH && ! $DRY_RUN; then
     release_require_command gh
     gh auth status >/dev/null 2>&1 || release_die "GitHub CLI is not authenticated; run: gh auth login"
     git remote get-url origin >/dev/null 2>&1 || release_die "origin remote is not configured"
@@ -175,10 +177,18 @@ release_expand_artifacts
 
 SAFE_TAG=${TAG//\//-}
 NOTES_FILE="$ROOT/.git/release-notes-${SAFE_TAG}.md"
+export RELEASE_NOTES_FILE=$NOTES_FILE
+export RELEASE_PREVIOUS_TAG=$PREVIOUS_TAG
 CHANGELOG=${RELEASE_CHANGELOG:-CHANGELOG.md}
-CHANGELOG_ARGS=(--version "$TARGET_VERSION" --output "$CHANGELOG" --notes "$NOTES_FILE")
-[[ -z "$PREVIOUS_TAG" ]] || CHANGELOG_ARGS+=(--from "$PREVIOUS_TAG")
-"$SCRIPT_DIR/changelog.sh" "${CHANGELOG_ARGS[@]}"
+if [[ -n "${RELEASE_CHANGELOG_COMMAND:-}" ]]; then
+    release_run_hook "Changelog" "$RELEASE_CHANGELOG_COMMAND"
+    [[ -s "$NOTES_FILE" ]] || \
+        release_die "RELEASE_CHANGELOG_COMMAND did not write RELEASE_NOTES_FILE: $NOTES_FILE"
+else
+    CHANGELOG_ARGS=(--version "$TARGET_VERSION" --output "$CHANGELOG" --notes "$NOTES_FILE")
+    [[ -z "$PREVIOUS_TAG" ]] || CHANGELOG_ARGS+=(--from "$PREVIOUS_TAG")
+    "$SCRIPT_DIR/changelog.sh" "${CHANGELOG_ARGS[@]}"
+fi
 
 git add -u
 if [[ "$CHANGELOG" != "false" && -f "$CHANGELOG" ]]; then

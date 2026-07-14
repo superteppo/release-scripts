@@ -65,6 +65,7 @@ release_version_from_tag() {
     local tag=$1
     local prefix=$2
     [[ "$tag" == "$prefix"* ]] || return 1
+    [[ -n "$prefix" || "$tag" != v* ]] || return 1
     release_normalize_version "${tag#"$prefix"}"
 }
 

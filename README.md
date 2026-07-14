@@ -17,9 +17,18 @@ Add the remote task catalog to the target project's `mise.toml`:
 ```toml
 [task_config]
 includes = [
+  "mise-tasks",
+  ".mise-tasks",
+  ".mise/tasks",
+  ".config/mise/tasks",
+  "mise/tasks",
   "git::https://github.com/superteppo/release-scripts.git//mise-tasks?ref=main"
 ]
 ```
+
+Setting `task_config.includes` replaces mise's default task directories. The
+local entries above keep existing file tasks discoverable; remove only the
+directories the target project does not use.
 
 This tracks toolkit updates without copying scripts. For reproducible builds,
 replace `main` with an exact release such as `v1.0.0`. mise caches remote tasks;
@@ -36,14 +45,14 @@ mise run release:doctor
 Paste this into the coding agent while it is working in the target repository:
 
 ```text
-Add the release task catalog from
-https://github.com/superteppo/release-scripts to this project. Preserve the
-existing mise.toml and add its remote mise-tasks directory from ref=main to
-task_config.includes. Configure RELEASE_GET_VERSION and RELEASE_SET_VERSION
-for the package manager already used by this project; use tag-only versioning
-if its version is VCS-derived. Add the existing test/build commands and release
-artifact globs as mise environment variables. Run `mise run release:doctor`,
-but do not create a release. Keep the changes minimal.
+Read and follow the integration instructions in:
+https://github.com/superteppo/release-scripts/blob/main/README.md
+
+Integrate the release task catalog into this repository. Inspect the existing
+mise and package-manager configuration before editing. Preserve local mise tasks
+and existing version-management behavior. Configure only the relevant release
+options, run `mise run release:doctor`, and do not create a release. Keep changes
+minimal and summarize them.
 ```
 
 ## Configure version ownership
@@ -92,8 +101,9 @@ RELEASE_ARTIFACTS = "dist/*.whl dist/*.tar.gz"
 ```
 
 For VCS-derived versions, omit both version commands. Git tags then remain the
-only version source. Custom and monorepo workflows can use any commands that
-obey the same get/set contract.
+only version source. If existing tags are unprefixed (`1.2.3`), also set
+`RELEASE_TAG_PREFIX = ""`; otherwise the default is `v1.2.3`. Custom and
+monorepo workflows can use any commands that obey the same get/set contract.
 
 ## Project defaults
 
@@ -152,6 +162,33 @@ Use `auto` to inspect commit messages from the latest stable `X.Y.Z` tag through
 The highest matching change wins. Types and optional scopes follow
 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
 
+### Changelog customization
+
+The built-in generator updates `RELEASE_CHANGELOG` and writes GitHub release
+notes. For a bespoke format, disable the built-in changelog file and configure
+a command that writes the exported `$RELEASE_NOTES_FILE`:
+
+```toml
+[env]
+RELEASE_CHANGELOG = "false"
+RELEASE_CHANGELOG_COMMAND = "./scripts/release-changelog.sh \"$RELEASE_PREVIOUS_TAG\" \"$RELEASE_VERSION\" \"$RELEASE_NOTES_FILE\""
+```
+
+The command also receives `RELEASE_TAG`. Tracked files it changes are included
+in the release commit; it should `git add` any newly created changelog files.
+
+### Tag prefix
+
+Tags use `vX.Y.Z` by default. To create `X.Y.Z` tags instead, set an explicitly
+empty prefix in `mise.toml`:
+
+```toml
+[env]
+RELEASE_TAG_PREFIX = ""
+```
+
+When moving tags are enabled, their names likewise become `X` and `X.Y`.
+
 Create only the local commit and tag:
 
 ```console
@@ -172,6 +209,7 @@ mise run release:github v1.2.3
 | `RELEASE_MOVING_TAGS` | none | Moving stable aliases: `major`, `minor`, or both |
 | `RELEASE_BRANCH_PATTERN` | default branch | Allowed release branch regex |
 | `RELEASE_CHANGELOG` | `CHANGELOG.md` | Changelog path; use `false` to disable |
+| `RELEASE_CHANGELOG_COMMAND` | built-in generator | Custom command that writes `$RELEASE_NOTES_FILE` |
 
 The configured commands are executed as trusted Bash. Artifact filenames may
 contain spaces, but the glob patterns themselves may not.
@@ -183,7 +221,8 @@ contain spaces, but the glob patterns themselves may not.
 - After a tag is created: retry only publication with
   `mise run release:github <tag>`. If moving tags were supplied only on the
   command line, repeat `--moving-tags major,minor` during the retry.
-- Inspect the next operation without changes using `--dry-run`.
+- Inspect the next operation without changes using `--dry-run`; dirty working
+  trees are allowed and GitHub authentication is not required.
 
 ## Optional Dropbox publishing
 
@@ -200,6 +239,13 @@ Add a configured `.dropboxuploader` file, then run:
 ```console
 mise run release:dropbox
 ```
+
+This task uses the bundled `tools/dropbox_uploader.sh`; a project-local uploader
+is not used. `RELEASE_DROPBOX_PATH` defaults to
+`<repository-directory>/releases`, so set it explicitly when the public project
+name differs. The task uploads only `RELEASE_ARTIFACTS` plus the configured
+changelog. Include files such as `version.txt` in `RELEASE_ARTIFACTS` when they
+must also be published.
 
 ## Development
 

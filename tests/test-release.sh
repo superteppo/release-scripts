@@ -23,7 +23,12 @@ assert_eq "$(release_bump_version 1.2.3 minor)" "1.3.0"
 assert_eq "$(release_bump_version 1.2.3 patch)" "1.2.4"
 assert_eq "$(release_normalize_version 1.3.0rc2)" "1.3.0-rc.2"
 assert_eq "$(release_pep440_version 1.3.0-rc.2)" "1.3.0rc2"
+assert_eq "$(release_version_from_tag 2.3.4 '')" "2.3.4"
+if release_version_from_tag v2.3.4 '' >/dev/null; then
+    fail "empty tag prefix accepted a v-prefixed tag"
+fi
 assert_eq "$(release_moving_tags 2.3.4 v 'major minor')" $'v2\nv2.3'
+assert_eq "$(release_moving_tags 2.3.4 '' 'major minor')" $'2\n2.3'
 if release_moving_tags 2.3.4 v invalid >/dev/null; then
     fail "invalid moving tag level was accepted"
 fi
@@ -109,6 +114,32 @@ unset RELEASE_MOVING_TAGS
 PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/github.sh" v1.2.4 --moving-tags major,minor >/dev/null
 assert_eq "$(git --git-dir="$REMOTE" rev-parse 'v1^{}')" "$(git rev-parse 'v1.3.0^{}')"
 
+# Doctor reports configuration mismatches before a release mutates anything.
+git tag -a 9.9.9 -m 9.9.9
+DOCTOR_OUTPUT=$(PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" 2>&1)
+assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "does not match RELEASE_TAG_PREFIX"
+
+export RELEASE_ARTIFACTS='missing/*.zip'
+DOCTOR_OUTPUT=$(PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" 2>&1)
+assert_file_contains <(printf '%s\n' "$DOCTOR_OUTPUT") "build must create them"
+
+export RELEASE_BUILD_COMMAND='missing-release-builder --output dist'
+if PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
+    fail "doctor accepted a missing build executable"
+fi
+export RELEASE_BUILD_COMMAND='mkdir -p dist && printf artifact > dist/app.tgz'
+export RELEASE_ARTIFACTS='dist/*.tgz'
+printf 'configured\n' > .dropboxuploader
+unset RELEASE_DROPBOX_PATH
+if PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
+    fail "doctor accepted Dropbox configuration without an explicit path"
+fi
+export RELEASE_DROPBOX_PATH='example/releases'
+PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1 || \
+    fail "doctor rejected valid Dropbox configuration"
+rm -f .dropboxuploader
+unset RELEASE_DROPBOX_PATH
+
 # Tag-only projects need no package-manager configuration.
 TAG_PROJECT="$TMP_ROOT/tag-only"
 mkdir -p "$TAG_PROJECT"
@@ -140,15 +171,16 @@ unset RELEASE_CHECK_COMMAND
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null
 git rev-parse -q --verify refs/tags/v0.0.1 >/dev/null || fail "tag-only release was not created"
 
-# Publishing preflight is part of the normal release command.
-if PATH="/usr/bin:/bin" "$REPOSITORY_ROOT/lib/release.sh" --dry-run patch >/dev/null 2>&1; then
+# Publishing preflight is part of a mutating release command.
+if PATH="/usr/bin:/bin" "$REPOSITORY_ROOT/lib/release.sh" patch >/dev/null 2>&1; then
     fail "publishing without gh should fail preflight"
 fi
 
 printf 'dirty\n' >> README.md
-if "$REPOSITORY_ROOT/lib/release.sh" --dry-run patch >/dev/null 2>&1; then
-    fail "dirty working tree should stop a release"
-fi
+DIRTY_STATUS=$(git status --porcelain)
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run patch)
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  0.0.2"
+assert_eq "$(git status --porcelain)" "$DIRTY_STATUS"
 
 # Default-branch enforcement and explicit release-branch patterns.
 BRANCH_PROJECT="$TMP_ROOT/branches"
@@ -218,5 +250,13 @@ git add changes.txt
 git commit -q -m "refactor: replace configuration model" -m "BREAKING CHANGE: configuration keys were renamed"
 PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run auto)
 assert_file_contains <(printf '%s\n' "$PLAN") "Target:  2.0.0"
+
+# Expanded by the configured hook's Bash process.
+# shellcheck disable=SC2016
+export RELEASE_CHANGELOG_COMMAND='printf "Release %s\n" "$RELEASE_VERSION" > "$RELEASE_NOTES_FILE"; printf "Version %s\n" "$RELEASE_VERSION" > CUSTOM_CHANGELOG.txt; git add CUSTOM_CHANGELOG.txt'
+"$REPOSITORY_ROOT/lib/release.sh" --no-publish auto >/dev/null
+git rev-parse -q --verify refs/tags/v2.0.0 >/dev/null || fail "custom-changelog release tag was not created"
+assert_file_contains CUSTOM_CHANGELOG.txt "Version 2.0.0"
+assert_eq "$(git show HEAD:CUSTOM_CHANGELOG.txt)" "Version 2.0.0"
 
 printf 'All release tests passed.\n'
