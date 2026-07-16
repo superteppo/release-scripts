@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0 - 2026-07-16
+
+- feat(tasks): add usage and improve setup prompts (`88d937c`)
+- feat(setup): add guided release configuration (`25b9850`)
+
 ## 1.4.1 - 2026-07-14
 
 - fix: verify Actions write access with Git (`ace695c`)
