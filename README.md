@@ -54,6 +54,10 @@ mise run release:setup --dry-run
 mise run release:setup --yes
 ```
 
+Dry-run still asks questions because the answers determine the plan being
+previewed. Proposed actions are shown in both modes; only normal mode offers the
+final apply confirmation.
+
 For GitHub Action repositories, `--yes` enables the recommended major moving
 alias such as `v1`. In other repositories moving tags remain opt-in. GitHub
 authentication is intentionally not automated; follow a doctor error with

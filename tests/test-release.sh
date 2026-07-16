@@ -371,10 +371,13 @@ SETUP_ENV=(
     -u RELEASE_CHANGELOG_COMMAND
 )
 SETUP_PLAN=$(PATH="$SETUP_BIN:/usr/bin:/bin" "${SETUP_ENV[@]}" \
-    "$REPOSITORY_ROOT/mise-tasks/release/setup" --dry-run --yes)
-assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "RELEASE_TAG_PREFIX=v"
-assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "RELEASE_MOVING_TAGS=major"
-assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "RELEASE_GET_VERSION=npm pkg get version"
+    "$REPOSITORY_ROOT/mise-tasks/release/setup" --dry-run --yes 2>&1)
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "[1/4] Release tag format?"
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "[4/4] Install pre-commit"
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") 'RELEASE_TAG_PREFIX="v"'
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") 'RELEASE_MOVING_TAGS="major"'
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") 'RELEASE_GET_VERSION="npm pkg get version'
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "Proposed actions (not applied yet):"
 [[ ! -e mise.toml ]] || fail "setup dry run created mise.toml"
 
 PATH="$SETUP_BIN:/usr/bin:/bin" "${SETUP_ENV[@]}" \
