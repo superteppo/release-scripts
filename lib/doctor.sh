@@ -44,7 +44,7 @@ doctor_check_hook() {
     fi
 }
 
-for command in bash git gh; do
+for command in bash git; do
     if command -v "$command" >/dev/null 2>&1; then
         printf 'ok  %s\n' "$command"
     else
@@ -54,11 +54,20 @@ for command in bash git gh; do
 done
 
 if command -v gh >/dev/null 2>&1; then
-    if gh auth status >/dev/null 2>&1; then
+    printf 'ok  gh\n'
+elif command -v mise >/dev/null 2>&1; then
+    printf 'ok  gh (mise-managed gh@2 fallback)\n'
+else
+    printf 'ERR gh is not installed and mise is unavailable\n' >&2
+    failed=true
+fi
+
+if release_gh_available; then
+    if release_gh auth status >/dev/null 2>&1; then
         printf 'ok  GitHub CLI authentication\n'
         gh_authenticated=true
     else
-        printf 'ERR GitHub CLI is not authenticated\n' >&2
+        printf 'ERR GitHub CLI is not authenticated; run gh auth login (or mise exec gh@2 -- gh auth login)\n' >&2
         failed=true
     fi
 fi
@@ -72,7 +81,7 @@ else
 fi
 
 if $gh_authenticated && $origin_configured; then
-    if can_push=$(gh api 'repos/{owner}/{repo}' --jq '.permissions.push' 2>/dev/null) && \
+    if can_push=$(release_gh api 'repos/{owner}/{repo}' --jq '.permissions.push' 2>/dev/null) && \
        [[ -n "$can_push" ]]; then
         if [[ "$can_push" == "true" ]]; then
             printf 'ok  GitHub repository permission: WRITE\n'

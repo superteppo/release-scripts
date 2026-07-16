@@ -70,8 +70,9 @@ if ! $DRY_RUN; then
 fi
 
 if $PUBLISH && ! $DRY_RUN; then
-    release_require_command gh
-    gh auth status >/dev/null 2>&1 || release_die "GitHub CLI is not authenticated; run: gh auth login"
+    release_gh_available || release_die "GitHub CLI is unavailable; install gh or mise"
+    release_gh auth status >/dev/null 2>&1 || \
+        release_die "GitHub CLI is not authenticated; run: gh auth login (or mise exec gh@2 -- gh auth login)"
     git remote get-url origin >/dev/null 2>&1 || release_die "origin remote is not configured"
 fi
 RELEASE_BRANCH=$(release_assert_branch)

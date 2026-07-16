@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-release_require_command gh
+release_gh_available || release_die "GitHub CLI is unavailable; install gh or mise"
 ROOT=$(release_project_root)
 cd "$ROOT"
 NOTES=${NOTES:-$ROOT/.git/release-notes-${SAFE_TAG}.md}
@@ -68,15 +68,15 @@ while IFS= read -r moving_tag; do
 done <<< "$MOVING_TAG_OUTPUT"
 git push --atomic origin "${tag_refspecs[@]}"
 
-if gh release view "$TAG" >/dev/null 2>&1; then
+if release_gh release view "$TAG" >/dev/null 2>&1; then
     release_info "Updating GitHub Release ${TAG}"
     if $PRERELEASE; then
-        gh release edit "$TAG" --notes-file "$NOTES" --prerelease
+        release_gh release edit "$TAG" --notes-file "$NOTES" --prerelease
     else
-        gh release edit "$TAG" --notes-file "$NOTES" --latest
+        release_gh release edit "$TAG" --notes-file "$NOTES" --latest
     fi
     if [[ ${#RELEASE_ASSET_FILES[@]} -gt 0 ]]; then
-        gh release upload "$TAG" "${RELEASE_ASSET_FILES[@]}" --clobber
+        release_gh release upload "$TAG" "${RELEASE_ASSET_FILES[@]}" --clobber
     fi
 else
     args=(release create "$TAG" --title "$TAG" --notes-file "$NOTES" --verify-tag)
@@ -88,5 +88,5 @@ else
     if [[ ${#RELEASE_ASSET_FILES[@]} -gt 0 ]]; then
         args+=("${RELEASE_ASSET_FILES[@]}")
     fi
-    gh "${args[@]}"
+    release_gh "${args[@]}"
 fi

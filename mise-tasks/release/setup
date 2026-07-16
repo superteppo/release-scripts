@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#MISE description="Interactively configure release tasks for this project"
+#MISE dir="{{cwd}}"
+set -euo pipefail
+
+REPOSITORY_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    printf 'ERROR: not inside a Git repository\n' >&2
+    exit 1
+}
+CONFIG="$PROJECT_ROOT/mise.toml"
+DRY_RUN=false
+ACCEPT_DEFAULTS=false
+SETTINGS=()
+
+usage() {
+    cat <<'EOF'
+Usage: release:setup [--dry-run] [--yes]
+
+Configure release defaults and optional Git hooks without replacing existing
+release configuration.
+
+  --dry-run  show the proposed actions without changing files
+  --yes      accept the recommended answers without prompting
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true ;;
+        --yes) ACCEPT_DEFAULTS=true ;;
+        -h|--help) usage; exit 0 ;;
+        *) printf 'ERROR: unknown argument: %s\n' "$1" >&2; usage >&2; exit 1 ;;
+    esac
+    shift
+done
+
+if ! $ACCEPT_DEFAULTS && [[ ! -t 0 ]]; then
+    printf 'ERROR: interactive setup requires a terminal; use --yes for recommended defaults\n' >&2
+    exit 1
+fi
+
+confirm() {
+    local prompt=$1
+    local default=$2
+    local suffix answer
+    [[ "$default" == yes ]] && suffix='Y/n' || suffix='y/N'
+    if $ACCEPT_DEFAULTS; then
+        [[ "$default" == yes ]]
+        return
+    fi
+    while true; do
+        printf '%s [%s] ' "$prompt" "$suffix" >&2
+        IFS= read -r answer
+        answer=${answer:-$default}
+        case "$answer" in
+            y|Y|yes|Yes|YES) return 0 ;;
+            n|N|no|No|NO) return 1 ;;
+            *) printf 'Please answer yes or no.\n' >&2 ;;
+        esac
+    done
+}
+
+setting_exists() {
+    local name=$1
+    [[ ${!name+x} == x ]]
+}
+
+queue_setting() {
+    local name=$1
+    local value=$2
+    if setting_exists "$name"; then
+        printf 'Keep existing %s=%q\n' "$name" "${!name}"
+    else
+        SETTINGS+=("$name=$value")
+        printf 'Configure %s=%q\n' "$name" "$value"
+    fi
+}
+
+cd "$PROJECT_ROOT"
+printf 'Release setup for %s\n\n' "$PROJECT_ROOT"
+
+if ! setting_exists RELEASE_TAG_PREFIX; then
+    PREFIX_DEFAULT=yes
+    if git tag --list | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-]|$)' &&
+       ! git tag --list | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-]|$)'; then
+        PREFIX_DEFAULT=no
+    fi
+    if confirm 'Prefix release tags with v (v1.2.3)?' "$PREFIX_DEFAULT"; then
+        queue_setting RELEASE_TAG_PREFIX v
+    else
+        queue_setting RELEASE_TAG_PREFIX ''
+    fi
+else
+    queue_setting RELEASE_TAG_PREFIX "${RELEASE_TAG_PREFIX}"
+fi
+
+if ! setting_exists RELEASE_MOVING_TAGS; then
+    ACTION_REPOSITORY=false
+    [[ -e action.yml || -e action.yaml ]] && ACTION_REPOSITORY=true
+    MAJOR_DEFAULT=no
+    $ACTION_REPOSITORY && MAJOR_DEFAULT=yes
+    MOVING=()
+    confirm 'Maintain the latest major alias (for example v1)?' "$MAJOR_DEFAULT" && MOVING+=(major)
+    confirm 'Maintain the latest minor alias (for example v1.2)?' no && MOVING+=(minor)
+    if [[ ${#MOVING[@]} -gt 0 ]]; then
+        queue_setting RELEASE_MOVING_TAGS "${MOVING[*]}"
+    fi
+else
+    queue_setting RELEASE_MOVING_TAGS "${RELEASE_MOVING_TAGS}"
+fi
+
+if ! setting_exists RELEASE_GET_VERSION && ! setting_exists RELEASE_SET_VERSION; then
+    VERSION_OWNER=tags
+    if [[ -f package.json ]]; then
+        if [[ -f pnpm-lock.yaml || -f yarn.lock ]] || \
+           grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"(pnpm|yarn)@' package.json; then
+            printf 'Detected pnpm or Yarn; keep tag-based versioning unless exact hooks are configured manually.\n'
+        else
+            NPM_DEFAULT=no
+            if [[ -f package-lock.json ]] || \
+               grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"npm@' package.json; then
+                NPM_DEFAULT=yes
+            fi
+            confirm 'Let npm own the exact package version?' "$NPM_DEFAULT" && VERSION_OWNER=npm
+        fi
+    elif [[ -f pyproject.toml ]] && grep -Eq '^\[tool\.poetry\]' pyproject.toml && \
+         confirm 'Let Poetry own the exact package version?' yes; then
+        VERSION_OWNER=poetry
+    elif [[ -f pyproject.toml && -f uv.lock ]] && confirm 'Let uv own the exact package version?' yes; then
+        VERSION_OWNER=uv
+    fi
+    case "$VERSION_OWNER" in
+        npm)
+            queue_setting RELEASE_GET_VERSION "npm pkg get version --workspaces=false | tr -d '\"'"
+            # Expanded later by the release hook.
+            # shellcheck disable=SC2016
+            queue_setting RELEASE_SET_VERSION 'npm version --no-git-tag-version --ignore-scripts "$RELEASE_VERSION"'
+            ;;
+        poetry)
+            queue_setting RELEASE_GET_VERSION 'poetry version --short'
+            # Expanded later by the release hook.
+            # shellcheck disable=SC2016
+            queue_setting RELEASE_SET_VERSION 'poetry version "$RELEASE_VERSION_PEP440"'
+            ;;
+        uv)
+            queue_setting RELEASE_GET_VERSION 'uv version --short'
+            # Expanded later by the release hook.
+            # shellcheck disable=SC2016
+            queue_setting RELEASE_SET_VERSION 'uv version "$RELEASE_VERSION_PEP440"'
+            ;;
+        tags) printf 'Use Git tags as the version source.\n' ;;
+    esac
+else
+    printf 'Keep existing version-ownership configuration.\n'
+fi
+
+INSTALL_HOOKS=false
+confirm 'Install pre-commit and Conventional Commit hooks?' yes && INSTALL_HOOKS=true
+
+printf '\nProposed actions:\n'
+if [[ ${#SETTINGS[@]} -gt 0 ]]; then
+    printf '  update %s through mise:\n' "$CONFIG"
+    printf '    %s\n' "${SETTINGS[@]}"
+else
+    printf '  no release environment changes\n'
+fi
+$INSTALL_HOOKS && printf '  configure pre-commit and commit-msg hooks\n'
+if command -v gh >/dev/null 2>&1; then
+    printf '  use existing gh: %s\n' "$(command -v gh)"
+else
+    printf '  use mise-managed gh@2 when GitHub access is needed\n'
+fi
+
+if $DRY_RUN; then
+    printf '\nDry run complete; no files changed.\n'
+    exit 0
+fi
+
+if ! $ACCEPT_DEFAULTS && ! confirm 'Apply these actions?' yes; then
+    printf 'Setup cancelled; no files changed.\n'
+    exit 0
+fi
+
+if [[ ${#SETTINGS[@]} -gt 0 ]]; then
+    mise set --file "$CONFIG" "${SETTINGS[@]}"
+fi
+if $INSTALL_HOOKS; then
+    "$REPOSITORY_ROOT/mise-tasks/release/setup-hooks"
+fi
+
+printf '\n==> Release doctor\n'
+if ! mise exec --fresh-env -C "$PROJECT_ROOT" -- "$REPOSITORY_ROOT/lib/doctor.sh"; then
+    printf '\nSetup is complete, but doctor found items to resolve before releasing.\n' >&2
+    printf 'For GitHub authentication, run: mise exec gh@2 -- gh auth login\n' >&2
+    exit 0
+fi
+printf '\nSetup complete. Preview the first release with: mise run release --dry-run auto\n'

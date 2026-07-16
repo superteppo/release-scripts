@@ -4,6 +4,8 @@ set -euo pipefail
 REPOSITORY_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=lib/version.sh
 source "$REPOSITORY_ROOT/lib/version.sh"
+# shellcheck source=lib/common.sh
+source "$REPOSITORY_ROOT/lib/common.sh"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -288,5 +290,103 @@ export RELEASE_CHANGELOG_COMMAND='printf "Release %s\n" "$RELEASE_VERSION" > "$R
 git rev-parse -q --verify refs/tags/v2.0.0 >/dev/null || fail "custom-changelog release tag was not created"
 assert_file_contains CUSTOM_CHANGELOG.txt "Version 2.0.0"
 assert_eq "$(git show HEAD:CUSTOM_CHANGELOG.txt)" "Version 2.0.0"
+
+# Hook setup creates a default once and never rewrites project-owned config.
+HOOK_PROJECT="$TMP_ROOT/hooks"
+HOOK_BIN="$TMP_ROOT/hook-bin"
+HOOK_LOG="$TMP_ROOT/pre-commit.log"
+mkdir -p "$HOOK_PROJECT" "$HOOK_BIN"
+cd "$HOOK_PROJECT"
+git init -q
+git checkout -q -b main
+export HOOK_LOG
+# Expanded by the generated mock when it runs.
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' \
+    'printf "%s\n" "$*" >> "$HOOK_LOG"' > "$HOOK_BIN/pre-commit"
+chmod +x "$HOOK_BIN/pre-commit"
+PATH="$HOOK_BIN:$PATH" "$REPOSITORY_ROOT/mise-tasks/release/setup-hooks" >/dev/null
+assert_file_contains .pre-commit-config.yaml "commitizen-tools/commitizen"
+assert_file_contains .pre-commit-config.yaml "rev: v4.10.0"
+assert_file_contains "$HOOK_LOG" "validate-config"
+assert_file_contains "$HOOK_LOG" "install --hook-type pre-commit --hook-type commit-msg"
+
+printf 'repos: []\n' > .pre-commit-config.yaml
+PATH="$HOOK_BIN:$PATH" "$REPOSITORY_ROOT/mise-tasks/release/setup-hooks" >/dev/null
+assert_eq "$(cat .pre-commit-config.yaml)" "repos: []"
+
+FALLBACK_PROJECT="$TMP_ROOT/hooks-fallback"
+FALLBACK_BIN="$TMP_ROOT/fallback-bin"
+MISE_LOG="$TMP_ROOT/mise.log"
+mkdir -p "$FALLBACK_PROJECT" "$FALLBACK_BIN"
+cd "$FALLBACK_PROJECT"
+git init -q
+git checkout -q -b main
+export MISE_LOG
+# Expanded by the generated mock when it runs.
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' \
+    'printf "%s\n" "$*" >> "$MISE_LOG"' > "$FALLBACK_BIN/mise"
+chmod +x "$FALLBACK_BIN/mise"
+PATH="$FALLBACK_BIN:/usr/bin:/bin" \
+    "$REPOSITORY_ROOT/mise-tasks/release/setup-hooks" >/dev/null
+assert_file_contains "$MISE_LOG" "exec pre-commit@4 -- pre-commit validate-config"
+assert_file_contains "$MISE_LOG" \
+    "exec pre-commit@4 -- pre-commit install --hook-type pre-commit --hook-type commit-msg"
+
+# Guided setup infers safe defaults, previews without writes, and delegates
+# configuration changes to mise instead of rewriting TOML itself.
+SETUP_PROJECT="$TMP_ROOT/setup"
+SETUP_BIN="$TMP_ROOT/setup-bin"
+SETUP_MISE_LOG="$TMP_ROOT/setup-mise.log"
+mkdir -p "$SETUP_PROJECT" "$SETUP_BIN"
+cd "$SETUP_PROJECT"
+git init -q
+git checkout -q -b main
+printf '{"name":"setup-test","version":"1.0.0"}\n' > package.json
+printf '{}\n' > package-lock.json
+printf 'name: setup-test\n' > action.yml
+git add package.json package-lock.json action.yml
+git -c user.name='Release Tests' -c user.email='release-tests@example.invalid' \
+    commit -q -m 'chore: initial project'
+export SETUP_MISE_LOG
+# Expanded by the generated mock when it runs.
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' \
+    'printf "%s\n" "$*" >> "$SETUP_MISE_LOG"' > "$SETUP_BIN/mise"
+printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$SETUP_BIN/pre-commit"
+chmod +x "$SETUP_BIN/mise" "$SETUP_BIN/pre-commit"
+
+SETUP_ENV=(
+    env
+    -u RELEASE_TAG_PREFIX
+    -u RELEASE_MOVING_TAGS
+    -u RELEASE_GET_VERSION
+    -u RELEASE_SET_VERSION
+    -u RELEASE_CHECK_COMMAND
+    -u RELEASE_BUILD_COMMAND
+    -u RELEASE_ARTIFACTS
+    -u RELEASE_BRANCH_PATTERN
+    -u RELEASE_CHANGELOG
+    -u RELEASE_CHANGELOG_COMMAND
+)
+SETUP_PLAN=$(PATH="$SETUP_BIN:/usr/bin:/bin" "${SETUP_ENV[@]}" \
+    "$REPOSITORY_ROOT/mise-tasks/release/setup" --dry-run --yes)
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "RELEASE_TAG_PREFIX=v"
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "RELEASE_MOVING_TAGS=major"
+assert_file_contains <(printf '%s\n' "$SETUP_PLAN") "RELEASE_GET_VERSION=npm pkg get version"
+[[ ! -e mise.toml ]] || fail "setup dry run created mise.toml"
+
+PATH="$SETUP_BIN:/usr/bin:/bin" "${SETUP_ENV[@]}" \
+    "$REPOSITORY_ROOT/mise-tasks/release/setup" --yes >/dev/null 2>&1
+assert_file_contains "$SETUP_MISE_LOG" "set --file"
+assert_file_contains "$SETUP_MISE_LOG" "/setup/mise.toml"
+assert_file_contains "$SETUP_MISE_LOG" "RELEASE_MOVING_TAGS=major"
+assert_file_contains .pre-commit-config.yaml "commitizen-tools/commitizen"
+
+# GitHub commands prefer an existing gh and otherwise use mise's pinned fallback.
+: > "$SETUP_MISE_LOG"
+PATH="$SETUP_BIN:/usr/bin:/bin" release_gh auth status
+assert_file_contains "$SETUP_MISE_LOG" "exec gh@2 -- gh auth status"
 
 printf 'All release tests passed.\n'

@@ -37,8 +37,8 @@ release_default_branch() {
         return 0
     fi
 
-    if command -v gh >/dev/null 2>&1 && git remote get-url origin >/dev/null 2>&1; then
-        branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)
+    if release_gh_available && git remote get-url origin >/dev/null 2>&1; then
+        branch=$(release_gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || true)
         if [[ -n "$branch" ]]; then
             printf '%s\n' "$branch"
             return 0
@@ -72,6 +72,21 @@ release_assert_branch() {
 
 release_require_command() {
     command -v "$1" >/dev/null 2>&1 || release_die "required command not found: $1"
+}
+
+release_gh_available() {
+    command -v gh >/dev/null 2>&1 || command -v mise >/dev/null 2>&1
+}
+
+release_gh() {
+    if command -v gh >/dev/null 2>&1; then
+        command gh "$@"
+    elif command -v mise >/dev/null 2>&1; then
+        mise exec gh@2 -- gh "$@"
+    else
+        release_error "GitHub CLI is unavailable; install gh or mise"
+        return 127
+    fi
 }
 
 release_run_hook() {

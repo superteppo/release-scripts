@@ -6,9 +6,12 @@ charge of package metadata and lockfiles.
 
 ## Requirements
 
-- Bash, Git, [mise](https://mise.jdx.dev/), and [GitHub CLI](https://cli.github.com/)
+- Bash, Git, and [mise](https://mise.jdx.dev/)
 - A clean working tree and an `origin` remote
-- `gh auth login` completed for the target repository
+- GitHub CLI authentication completed for the target repository
+
+An existing [GitHub CLI](https://cli.github.com/) is preferred. When it is
+missing, release tasks run a mise-managed `gh@2` without changing `[tools]`.
 
 ## Install
 
@@ -35,11 +38,27 @@ This tracks toolkit updates without copying scripts. For reproducible builds,
 replace `main` with an exact release such as `v1.4.0`. mise caches remote tasks;
 run `mise cache clear` to refresh them immediately.
 
-Check the setup:
+Run the guided setup:
 
 ```console
-mise run release:doctor
+mise run release:setup
 ```
+
+It detects npm, Poetry, uv, or tag-only versioning; offers moving tags and
+Conventional Commit hooks; preserves existing release variables; and finishes
+with `release:doctor`. It writes environment defaults through mise rather than
+rewriting TOML itself. Preview or accept its recommended answers with:
+
+```console
+mise run release:setup --dry-run
+mise run release:setup --yes
+```
+
+For GitHub Action repositories, `--yes` enables the recommended major moving
+alias such as `v1`. In other repositories moving tags remain opt-in. GitHub
+authentication is intentionally not automated; follow a doctor error with
+`gh auth login` or `mise exec gh@2 -- gh auth login`. The sections below
+document the same configuration manually.
 
 ### Install with Claude Code or Codex
 
@@ -175,12 +194,18 @@ Use [pre-commit](https://pre-commit.com/) for fast, project-specific checks
 before changes enter release history:
 
 ```console
-pre-commit install
+mise run release:setup-hooks
 pre-commit run --all-files
 ```
 
-Keep the hook configuration in the target repository. Pre-commit complements
-`RELEASE_CHECK_COMMAND`; the latter remains the authoritative release gate.
+The setup task uses the project's active pre-commit when available; otherwise
+mise automatically installs pre-commit 4. It installs both `pre-commit` and
+`commit-msg` Git hooks. If `.pre-commit-config.yaml` is absent, it creates a
+minimal configuration with Commitizen validation pinned to `v4.10.0`. Existing
+tool and hook configuration is validated and left unchanged; its rules remain
+owned by the target project. Review and commit a newly generated configuration.
+Pre-commit complements `RELEASE_CHECK_COMMAND`; the latter remains the
+authoritative release gate.
 
 ### GitHub Actions
 
