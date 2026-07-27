@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.0 - 2026-07-27
+
+- feat(release): iterate release candidates with a bare --pre (`53a88ae`)
+
 ## 1.5.0 - 2026-07-16
 
 - feat(tasks): add usage and improve setup prompts (`88d937c`)
