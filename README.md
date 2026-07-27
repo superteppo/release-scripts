@@ -160,8 +160,8 @@ mise run release patch
 mise run release auto
 mise run release minor
 mise run release major
+mise run release --pre
 mise run release --pre minor
-mise run release --pre auto
 mise run release --promote
 mise run release --dry-run patch
 mise run release --moving-tags major,minor patch
@@ -175,6 +175,22 @@ Release assets are replaced safely when GitHub publishing is retried.
 Moving tags are optional. For a stable `v2.3.0` release, `major minor` updates
 `v2` and `v2.3` to the same commit. They are force-updated atomically with the
 immutable release tag. Prereleases never move these aliases.
+
+### Release candidates
+
+`--pre` creates `X.Y.Z-rc.N` tags and never moves the stable aliases. The bump
+is optional:
+
+- With no unpromoted rc tag, `--pre` alone behaves like `--pre auto`.
+- With an unpromoted rc tag, `--pre` alone keeps `X.Y.Z` and advances the
+  candidate number, so `v1.5.0-rc.1` becomes `v1.5.0-rc.2`.
+- An explicit bump that lands on the same `X.Y.Z` also advances the candidate
+  number. One that lands higher starts that version at `rc.1`, so `--pre major`
+  turns an unpromoted `v1.5.0-rc.2` into `v2.0.0-rc.1`.
+- An explicit bump that lands below an unpromoted rc stops the release.
+
+An rc tag counts as unpromoted while its `X.Y.Z` is ahead of the latest stable
+tag. `--promote` then releases the candidate's `X.Y.Z` as a stable version.
 
 ### Automatic version bump
 

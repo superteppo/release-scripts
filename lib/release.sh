@@ -10,10 +10,12 @@ source "$SCRIPT_DIR/version.sh"
 usage() {
     cat <<'EOF'
 Usage: release.sh [OPTIONS] major|minor|patch|auto
+       release.sh --pre [OPTIONS] [major|minor|patch|auto]
        release.sh --promote [OPTIONS]
 
 Options:
-  --pre          create an rc.1 prerelease
+  --pre          create or continue a release candidate; the bump defaults to
+                 auto, and an unpromoted rc is advanced to the next rc number
   --promote      promote the latest rc tag to a stable release
   --dry-run      show the release plan without changing anything
   --no-publish   create the local commit and tag without pushing
@@ -53,8 +55,10 @@ done
 
 if $PROMOTE; then
     ! $PRE && [[ -z "$BUMP" ]] || release_die "--promote cannot be combined with --pre or a bump"
-else
-    [[ -n "$BUMP" ]] || { usage >&2; exit 1; }
+elif [[ -z "$BUMP" ]] && ! $PRE; then
+    release_error "a version bump is required: auto, major, minor, or patch"
+    usage >&2
+    exit 1
 fi
 
 if [[ -n "${RELEASE_GET_VERSION:-}" || -n "${RELEASE_SET_VERSION:-}" ]]; then
@@ -84,14 +88,6 @@ if [[ -n "$LATEST_STABLE_TAG" ]]; then
     LATEST_STABLE_VERSION=$(release_version_from_tag "$LATEST_STABLE_TAG" "$TAG_PREFIX")
 fi
 
-EFFECTIVE_BUMP=$BUMP
-INFERRED_BUMP=false
-if ! $PROMOTE && [[ "$BUMP" == "auto" ]]; then
-    EFFECTIVE_BUMP=$(release_recommended_bump "$LATEST_STABLE_TAG") || \
-        release_die "no release-worthy Conventional Commits found since ${LATEST_STABLE_TAG:-the beginning}"
-    INFERRED_BUMP=true
-fi
-
 PACKAGE_VERSION=""
 if [[ -n "${RELEASE_GET_VERSION:-}" ]]; then
     PACKAGE_VERSION_RAW=$(bash -o pipefail -c "$RELEASE_GET_VERSION") || \
@@ -100,6 +96,9 @@ if [[ -n "${RELEASE_GET_VERSION:-}" ]]; then
     PACKAGE_VERSION=$(release_normalize_version "$PACKAGE_VERSION_RAW") || \
         release_die "unsupported package version returned by RELEASE_GET_VERSION: ${PACKAGE_VERSION_RAW}"
 fi
+
+EFFECTIVE_BUMP=$BUMP
+INFERRED_BUMP=false
 
 if $PROMOTE; then
     PRE_TAG=$(release_latest_prerelease_tag "$TAG_PREFIX" || true)
@@ -111,16 +110,70 @@ if $PROMOTE; then
         release_die "package version ${PACKAGE_VERSION} does not match prerelease tag ${CURRENT_VERSION}"
     fi
 else
-    CURRENT_VERSION=${PACKAGE_VERSION:-$LATEST_STABLE_VERSION}
-    [[ "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
-        release_die "current version is a prerelease; use --promote"
-    if [[ -n "$PACKAGE_VERSION" && -n "$LATEST_STABLE_TAG" && "$PACKAGE_VERSION" != "$LATEST_STABLE_VERSION" ]]; then
-        release_die "package version ${PACKAGE_VERSION} does not match latest tag ${LATEST_STABLE_VERSION}"
+    # An rc tag whose base version is still ahead of the latest stable tag is an
+    # open prerelease line that --pre continues instead of restarting.
+    OPEN_PRE_TAG=""
+    OPEN_PRE_VERSION=""
+    OPEN_PRE_BASE=""
+    OPEN_PRE_NUMBER=""
+    if $PRE; then
+        OPEN_PRE_TAG=$(release_latest_prerelease_tag "$TAG_PREFIX" || true)
+        if [[ -n "$OPEN_PRE_TAG" ]]; then
+            OPEN_PRE_VERSION=$(release_version_from_tag "$OPEN_PRE_TAG" "$TAG_PREFIX")
+            OPEN_PRE_BASE=${OPEN_PRE_VERSION%-rc.*}
+            OPEN_PRE_NUMBER=${OPEN_PRE_VERSION##*-rc.}
+            if ! release_version_gt "$OPEN_PRE_BASE" "$LATEST_STABLE_VERSION"; then
+                OPEN_PRE_TAG=""
+                OPEN_PRE_BASE=""
+            fi
+        fi
     fi
-    TARGET_VERSION=$(release_bump_version "$CURRENT_VERSION" "$EFFECTIVE_BUMP") || \
-        release_die "cannot bump version: ${CURRENT_VERSION}"
-    $PRE && TARGET_VERSION="${TARGET_VERSION}-rc.1"
-    PREVIOUS_TAG=$LATEST_STABLE_TAG
+
+    # A bare --pre with no open prerelease line infers the bump from history.
+    if [[ -z "$EFFECTIVE_BUMP" && -z "$OPEN_PRE_BASE" ]]; then
+        EFFECTIVE_BUMP=auto
+    fi
+    if [[ "$EFFECTIVE_BUMP" == "auto" ]]; then
+        EFFECTIVE_BUMP=$(release_recommended_bump "$LATEST_STABLE_TAG") || \
+            release_die "no release-worthy Conventional Commits found since ${LATEST_STABLE_TAG:-the beginning}"
+        INFERRED_BUMP=true
+    fi
+
+    if [[ -n "$OPEN_PRE_BASE" ]]; then
+        CURRENT_VERSION=$OPEN_PRE_VERSION
+        if [[ -n "$PACKAGE_VERSION" && "$PACKAGE_VERSION" != "$CURRENT_VERSION" ]]; then
+            release_die "package version ${PACKAGE_VERSION} does not match prerelease tag ${CURRENT_VERSION}"
+        fi
+        NEXT_BASE=$OPEN_PRE_BASE
+        if [[ -n "$EFFECTIVE_BUMP" ]]; then
+            NEXT_BASE=$(release_bump_version "$LATEST_STABLE_VERSION" "$EFFECTIVE_BUMP") || \
+                release_die "cannot bump version: ${LATEST_STABLE_VERSION}"
+            if release_version_gt "$OPEN_PRE_BASE" "$NEXT_BASE"; then
+                release_die "unpromoted prerelease ${OPEN_PRE_TAG} is ahead of ${NEXT_BASE}; omit the bump to continue it, or use --promote"
+            fi
+        fi
+        if [[ "$NEXT_BASE" == "$OPEN_PRE_BASE" ]]; then
+            [[ "$(git rev-parse "${OPEN_PRE_TAG}^{}")" != "$(git rev-parse HEAD)" ]] || \
+                release_die "no commits since ${OPEN_PRE_TAG}"
+            TARGET_VERSION="${OPEN_PRE_BASE}-rc.$((OPEN_PRE_NUMBER + 1))"
+            EFFECTIVE_BUMP=prerelease
+            INFERRED_BUMP=false
+        else
+            TARGET_VERSION="${NEXT_BASE}-rc.1"
+        fi
+        PREVIOUS_TAG=$OPEN_PRE_TAG
+    else
+        CURRENT_VERSION=${PACKAGE_VERSION:-$LATEST_STABLE_VERSION}
+        [[ "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+            release_die "current version is a prerelease; use --pre or --promote"
+        if [[ -n "$PACKAGE_VERSION" && -n "$LATEST_STABLE_TAG" && "$PACKAGE_VERSION" != "$LATEST_STABLE_VERSION" ]]; then
+            release_die "package version ${PACKAGE_VERSION} does not match latest tag ${LATEST_STABLE_VERSION}"
+        fi
+        TARGET_VERSION=$(release_bump_version "$CURRENT_VERSION" "$EFFECTIVE_BUMP") || \
+            release_die "cannot bump version: ${CURRENT_VERSION}"
+        $PRE && TARGET_VERSION="${TARGET_VERSION}-rc.1"
+        PREVIOUS_TAG=$LATEST_STABLE_TAG
+    fi
 fi
 
 TAG="${TAG_PREFIX}${TARGET_VERSION}"

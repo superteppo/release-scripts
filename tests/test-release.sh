@@ -29,6 +29,14 @@ assert_eq "$(release_version_from_tag 2.3.4 '')" "2.3.4"
 if release_version_from_tag v2.3.4 '' >/dev/null; then
     fail "empty tag prefix accepted a v-prefixed tag"
 fi
+release_version_gt 1.3.0 1.2.9 || fail "1.3.0 should sort above 1.2.9"
+release_version_gt 1.2.10 1.2.9 || fail "1.2.10 should sort above 1.2.9"
+if release_version_gt 1.2.3 1.2.3; then
+    fail "equal versions must not compare as greater"
+fi
+if release_version_gt 1.2.3 2.0.0; then
+    fail "1.2.3 must not sort above 2.0.0"
+fi
 assert_eq "$(release_moving_tags 2.3.4 v 'major minor')" $'v2\nv2.3'
 assert_eq "$(release_moving_tags 2.3.4 '' 'major minor')" $'2\n2.3'
 if release_moving_tags 2.3.4 v invalid >/dev/null; then
@@ -79,11 +87,38 @@ assert_eq "$(cat VERSION)" "1.3.0-rc.1"
 git rev-parse -q --verify refs/tags/v1.3.0-rc.1 >/dev/null || fail "prerelease tag was not created"
 assert_eq "$(git rev-parse 'v1^{}')" "$(git rev-parse 'v1.2.4^{}')"
 
+# An unpromoted candidate is continued, not restarted, and needs new commits.
+if "$REPOSITORY_ROOT/lib/release.sh" --no-publish --pre >/dev/null 2>&1; then
+    fail "a candidate without new commits should stop"
+fi
+printf 'candidate\n' > notes.txt
+git add notes.txt
+git commit -q -m "fix: correct candidate behaviour"
+if "$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run --pre patch >/dev/null 2>&1; then
+    fail "a bump below an unpromoted candidate should stop"
+fi
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run --pre major)
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  2.0.0-rc.1"
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run --pre minor)
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  1.3.0-rc.2"
+"$REPOSITORY_ROOT/lib/release.sh" --no-publish --pre >/dev/null
+assert_eq "$(cat VERSION)" "1.3.0-rc.2"
+git rev-parse -q --verify refs/tags/v1.3.0-rc.2 >/dev/null || fail "next candidate tag was not created"
+assert_file_contains CHANGELOG.md "## 1.3.0-rc.2 -"
+
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish --promote >/dev/null
 assert_eq "$(cat VERSION)" "1.3.0"
 git rev-parse -q --verify refs/tags/v1.3.0 >/dev/null || fail "promoted tag was not created"
 assert_eq "$(git rev-parse 'v1^{}')" "$(git rev-parse 'v1.3.0^{}')"
 assert_eq "$(git rev-parse 'v1.3^{}')" "$(git rev-parse 'v1.3.0^{}')"
+
+# A promoted candidate no longer counts as an open prerelease line.
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run --pre minor)
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  1.4.0-rc.1"
+
+# A missing bump explains itself instead of printing bare usage.
+RELEASE_OUTPUT=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run 2>&1 || true)
+assert_file_contains <(printf '%s\n' "$RELEASE_OUTPUT") "a version bump is required"
 
 git init -q --bare "$REMOTE"
 git remote add origin "$REMOTE"
@@ -282,6 +317,11 @@ git add changes.txt
 git commit -q -m "refactor: replace configuration model" -m "BREAKING CHANGE: configuration keys were renamed"
 PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run auto)
 assert_file_contains <(printf '%s\n' "$PLAN") "Target:  2.0.0"
+
+# Without an existing candidate, a bare --pre infers the bump like auto.
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --no-publish --dry-run --pre)
+assert_file_contains <(printf '%s\n' "$PLAN") "Bump:    major (Conventional Commits)"
+assert_file_contains <(printf '%s\n' "$PLAN") "Target:  2.0.0-rc.1"
 
 # Expanded by the configured hook's Bash process.
 # shellcheck disable=SC2016

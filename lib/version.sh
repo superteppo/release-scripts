@@ -39,6 +39,24 @@ release_bump_version() {
     printf '%s.%s.%s\n' "$major" "$minor" "$patch"
 }
 
+release_version_gt() {
+    local left=$1
+    local right=$2
+    local left_parts right_parts index
+    [[ "$left" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    [[ "$right" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    IFS=. read -r -a left_parts <<< "$left"
+    IFS=. read -r -a right_parts <<< "$right"
+    for index in 0 1 2; do
+        if ((left_parts[index] > right_parts[index])); then
+            return 0
+        elif ((left_parts[index] < right_parts[index])); then
+            return 1
+        fi
+    done
+    return 1
+}
+
 release_recommended_bump() {
     local from_tag=${1:-}
     local range=HEAD
