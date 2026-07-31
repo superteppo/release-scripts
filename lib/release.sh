@@ -105,7 +105,8 @@ if $PROMOTE; then
     [[ -n "$PRE_TAG" ]] || release_die "no ${TAG_PREFIX}X.Y.Z-rc.N tag found to promote"
     CURRENT_VERSION=$(release_version_from_tag "$PRE_TAG" "$TAG_PREFIX")
     TARGET_VERSION=${CURRENT_VERSION%%-rc.*}
-    PREVIOUS_TAG=$PRE_TAG
+    # The stable entry replaces the candidate entries, so it covers them all.
+    PREVIOUS_TAG=$LATEST_STABLE_TAG
     if [[ -n "$PACKAGE_VERSION" && "$PACKAGE_VERSION" != "$CURRENT_VERSION" ]]; then
         release_die "package version ${PACKAGE_VERSION} does not match prerelease tag ${CURRENT_VERSION}"
     fi

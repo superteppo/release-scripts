@@ -170,7 +170,9 @@ mise run release --moving-tags major,minor patch
 The task checks dependencies, GitHub authentication, versions, configured
 checks, builds, and artifacts. It then updates `CHANGELOG.md`, creates a release
 commit and annotated tag, pushes them, and creates the GitHub Release with `gh`.
-Release assets are replaced safely when GitHub publishing is retried.
+Release assets are replaced safely when GitHub publishing is retried. Changelog
+entries list every commit since the previous release except the
+`chore(release):` commits this task creates itself.
 
 Moving tags are optional. For a stable `v2.3.0` release, `major minor` updates
 `v2` and `v2.3` to the same commit. They are force-updated atomically with the
@@ -191,6 +193,11 @@ is optional:
 
 An rc tag counts as unpromoted while its `X.Y.Z` is ahead of the latest stable
 tag. `--promote` then releases the candidate's `X.Y.Z` as a stable version.
+
+The changelog keeps only stable entries and the candidates released after the
+newest stable one. Each candidate entry lists the commits added since the
+previous candidate. Promoting replaces those entries with a single stable entry
+covering every commit since the previous stable tag, so nothing is lost.
 
 ### Automatic version bump
 

@@ -105,10 +105,21 @@ assert_file_contains <(printf '%s\n' "$PLAN") "Target:  1.3.0-rc.2"
 assert_eq "$(cat VERSION)" "1.3.0-rc.2"
 git rev-parse -q --verify refs/tags/v1.3.0-rc.2 >/dev/null || fail "next candidate tag was not created"
 assert_file_contains CHANGELOG.md "## 1.3.0-rc.2 -"
+assert_file_contains CHANGELOG.md "## 1.3.0-rc.1 -"
 
 "$REPOSITORY_ROOT/lib/release.sh" --no-publish --promote >/dev/null
 assert_eq "$(cat VERSION)" "1.3.0"
 git rev-parse -q --verify refs/tags/v1.3.0 >/dev/null || fail "promoted tag was not created"
+# The stable entry absorbs the candidate entries it supersedes.
+assert_file_contains CHANGELOG.md "## 1.3.0 -"
+assert_file_contains CHANGELOG.md "fix: correct candidate behaviour"
+assert_file_contains CHANGELOG.md "## 1.2.4 -"
+if grep -Fq -- "## 1.3.0-rc." CHANGELOG.md; then
+    fail "promoted changelog still lists release candidates"
+fi
+if grep -Fq -- "chore(release)" CHANGELOG.md; then
+    fail "changelog documents this tool's own release commits"
+fi
 assert_eq "$(git rev-parse 'v1^{}')" "$(git rev-parse 'v1.3.0^{}')"
 assert_eq "$(git rev-parse 'v1.3^{}')" "$(git rev-parse 'v1.3.0^{}')"
 
