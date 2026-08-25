@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0 - 2026-08-25
+
+### breaking
+
+- **feat:** add standalone release scripts ([`076e976`](../../commit/076e9762414548357bf974040d28b5abc7fef4de))
+
+### feat
+
+- **changelog:** drop superseded release-candidate entries ([`e5db36a`](../../commit/e5db36a36ccc7ea555c1ae7b0108b2b41f5381fb))
+
 ## 1.6.0 - 2026-07-27
 
 - feat(release): iterate release candidates with a bare --pre (`53a88ae`)
