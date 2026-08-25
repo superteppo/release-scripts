@@ -6,14 +6,51 @@ charge of package metadata and lockfiles.
 
 ## Requirements
 
-- Bash, Git, and [mise](https://mise.jdx.dev/)
+- Bash, Git, and [GitHub CLI](https://cli.github.com/)
 - A clean working tree and an `origin` remote
 - GitHub CLI authentication completed for the target repository
 
-An existing [GitHub CLI](https://cli.github.com/) is preferred. When it is
-missing, release tasks run a mise-managed `gh@2` without changing `[tools]`.
+[mise](https://mise.jdx.dev/) is optional. When mise is present and `gh` is
+missing, the release scripts can use a mise-managed `gh@2` instead.
 
 ## Install
+
+### Standalone
+
+From the target repository, install the latest stable scripts:
+
+```console
+curl -fsSL https://raw.githubusercontent.com/superteppo/release-scripts/main/install.sh | bash
+./.release-scripts/release setup
+```
+
+The installer adds only the runtime scripts, templates, and license notices
+under `.release-scripts`. It records the selected update channel and resolved
+Git commit. Review and commit that directory when releases must work without an
+installation step in CI.
+
+Update to the newest stable release, or follow the newest patch in a release
+series without knowing its exact version:
+
+```console
+./.release-scripts/release update latest
+./.release-scripts/release update 1.5
+./.release-scripts/release update       # keep the selected channel
+```
+
+Exact versions such as `1.5.0` are also accepted. `latest` resolves the highest
+stable version tag; `1.5` follows the moving `v1.5` tag.
+
+Standalone configuration is stored in `.release.env`. It is trusted Bash owned
+by the target project, because release hooks are shell commands. Preview or
+accept the guided setup defaults with:
+
+```console
+./.release-scripts/release setup --dry-run
+./.release-scripts/release setup --yes
+```
+
+### With mise
 
 Add the remote task catalog to the target project's `mise.toml`:
 
@@ -38,16 +75,16 @@ This tracks toolkit updates without copying scripts. For reproducible builds,
 replace `main` with an exact release such as `v1.4.0`. mise caches remote tasks;
 run `mise cache clear` to refresh them immediately.
 
-Run the guided setup:
+Then run the guided setup:
 
 ```console
 mise run release:setup
 ```
 
-It detects npm, Poetry, uv, or tag-only versioning; offers moving tags and
-Conventional Commit hooks; preserves existing release variables; and finishes
-with `release:doctor`. It writes environment defaults through mise rather than
-rewriting TOML itself. Preview or accept its recommended answers with:
+Both setup variants detect npm, Poetry, uv, or tag-only versioning; offer moving
+tags and Conventional Commit hooks; preserve existing release variables; and
+finish with the doctor checks. The mise variant writes environment defaults
+through mise. Preview or accept its recommended answers with:
 
 ```console
 mise run release:setup --dry-run
@@ -61,8 +98,7 @@ final apply confirmation.
 For GitHub Action repositories, `--yes` enables the recommended major moving
 alias such as `v1`. In other repositories moving tags remain opt-in. GitHub
 authentication is intentionally not automated; follow a doctor error with
-`gh auth login` or `mise exec gh@2 -- gh auth login`. The sections below
-document the same configuration manually.
+`gh auth login` or, with mise, `mise exec gh@2 -- gh auth login`.
 
 ### Install with Claude Code or Codex
 
@@ -72,10 +108,10 @@ Paste this into the coding agent while it is working in the target repository:
 Read and follow the integration instructions in:
 https://github.com/superteppo/release-scripts/blob/main/README.md
 
-Integrate the release task catalog into this repository. Inspect the existing
-mise and package-manager configuration before editing. Preserve local mise tasks
-and existing version-management behavior. Configure only the relevant release
-options, run `mise run release:doctor`, and do not create a release. Keep changes
+Install the release scripts in this repository. Use the existing mise integration
+when mise is already configured; otherwise use the standalone installation.
+Inspect package-manager configuration and preserve existing version-management
+behavior. Run the release doctor, but do not create a release. Keep changes
 minimal and summarize them.
 ```
 
@@ -90,63 +126,60 @@ The release task calculates an exact version and exports:
 Configure commands that read and set that exact version. Configure both or
 neither.
 
-Pin the release toolchain under `[tools]` or in mise-supported version files so
-the same command versions are used locally and in CI.
+Pin the project's package and build tools so the same command versions are used
+locally and in CI.
 
 ### npm
 
-```toml
-[env]
-RELEASE_GET_VERSION = "npm pkg get version --workspaces=false | tr -d '\"'"
-RELEASE_SET_VERSION = "npm version --no-git-tag-version --ignore-scripts \"$RELEASE_VERSION\""
-RELEASE_CHECK_COMMAND = "npm test"
-RELEASE_BUILD_COMMAND = "npm run build"
-RELEASE_ARTIFACTS = "dist/*.tgz"
-RELEASE_MOVING_TAGS = "major minor"
+```bash
+RELEASE_GET_VERSION='npm pkg get version --workspaces=false | tr -d "\""'
+RELEASE_SET_VERSION='npm version --no-git-tag-version --ignore-scripts "$RELEASE_VERSION"'
+RELEASE_CHECK_COMMAND='npm test'
+RELEASE_BUILD_COMMAND='npm run build'
+RELEASE_ARTIFACTS='dist/*.tgz'
+RELEASE_MOVING_TAGS='major minor'
 ```
 
 ### Poetry
 
-```toml
-[env]
-RELEASE_GET_VERSION = "poetry version --short"
-RELEASE_SET_VERSION = "poetry version \"$RELEASE_VERSION_PEP440\""
-RELEASE_CHECK_COMMAND = "poetry run pytest"
-RELEASE_BUILD_COMMAND = "poetry build"
-RELEASE_ARTIFACTS = "dist/*.whl dist/*.tar.gz"
+```bash
+RELEASE_GET_VERSION='poetry version --short'
+RELEASE_SET_VERSION='poetry version "$RELEASE_VERSION_PEP440"'
+RELEASE_CHECK_COMMAND='poetry run pytest'
+RELEASE_BUILD_COMMAND='poetry build'
+RELEASE_ARTIFACTS='dist/*.whl dist/*.tar.gz'
 ```
 
 ### uv
 
-```toml
-[env]
-RELEASE_GET_VERSION = "uv version --short"
-RELEASE_SET_VERSION = "uv version \"$RELEASE_VERSION_PEP440\""
-RELEASE_CHECK_COMMAND = "uv run pytest"
-RELEASE_BUILD_COMMAND = "uv build"
-RELEASE_ARTIFACTS = "dist/*.whl dist/*.tar.gz"
+```bash
+RELEASE_GET_VERSION='uv version --short'
+RELEASE_SET_VERSION='uv version "$RELEASE_VERSION_PEP440"'
+RELEASE_CHECK_COMMAND='uv run pytest'
+RELEASE_BUILD_COMMAND='uv build'
+RELEASE_ARTIFACTS='dist/*.whl dist/*.tar.gz'
 ```
 
 For VCS-derived versions, omit both version commands. Git tags then remain the
 only version source. If existing tags are unprefixed (`1.2.3`), also set
-`RELEASE_TAG_PREFIX = ""`; otherwise the default is `v1.2.3`. Custom and
+`RELEASE_TAG_PREFIX=''`; otherwise the default is `v1.2.3`. Custom and
 monorepo workflows can use any commands that obey the same get/set contract.
 
 ## Project defaults
 
-Set reusable defaults in the target project's existing `mise.toml`:
+Standalone users set reusable defaults in `.release.env`:
 
-```toml
-[env]
-RELEASE_MOVING_TAGS = "major minor"
-RELEASE_BRANCH_PATTERN = "main|release/.+|fix/.+"
+```bash
+RELEASE_MOVING_TAGS='major minor'
+RELEASE_BRANCH_PATTERN='main|release/.+|fix/.+'
 # Replace these examples with commands and artifacts provided by the project.
-RELEASE_CHECK_COMMAND = "node --test"
-RELEASE_BUILD_COMMAND = "npm run build"
-RELEASE_ARTIFACTS = "dist/*.zip"
+RELEASE_CHECK_COMMAND='node --test'
+RELEASE_BUILD_COMMAND='npm run build'
+RELEASE_ARTIFACTS='dist/*.zip'
 ```
 
-Command-line options override the corresponding mise default.
+Mise users put the same variables under `[env]` in `mise.toml`. Command-line
+options override the corresponding project default.
 
 By default, releases are allowed only from GitHub's default branch. Set
 `RELEASE_BRANCH_PATTERN` to an extended regular expression when dedicated
@@ -156,23 +189,56 @@ branch name.
 ## Release
 
 ```console
-mise run release patch
-mise run release auto
-mise run release minor
-mise run release major
-mise run release --pre
-mise run release --pre minor
-mise run release --promote
-mise run release --dry-run patch
-mise run release --moving-tags major,minor patch
+./.release-scripts/release patch
+./.release-scripts/release auto
+./.release-scripts/release --pre
+./.release-scripts/release --pre minor
+./.release-scripts/release --promote
+./.release-scripts/release --dry-run patch
+./.release-scripts/release --moving-tags major,minor patch
 ```
+
+With mise, replace `./.release-scripts/release` with `mise run release`.
 
 The task checks dependencies, GitHub authentication, versions, configured
 checks, builds, and artifacts. It then updates `CHANGELOG.md`, creates a release
 commit and annotated tag, pushes them, and creates the GitHub Release with `gh`.
-Release assets are replaced safely when GitHub publishing is retried. Changelog
-entries list every commit since the previous release except the
-`chore(release):` commits this task creates itself.
+Release assets are replaced safely when GitHub publishing is retried.
+
+### Changelog entries
+
+An entry lists every commit since the previous release except the
+`chore(release):` commits this task creates itself. Commits are grouped by their
+Conventional Commit type, in this order:
+
+1. `breaking`, holding every `type!:` commit whatever its type.
+2. The types named by Conventional Commits 1.0.0: `feat`, `fix`, `docs`, `perf`,
+   `refactor`, `test`, `style`, `build`, `ci`, `chore`.
+3. Any project-specific type, alphabetically.
+4. `other`, for commits without a recognizable type.
+
+Empty groups are left out. Scopes are kept, and each commit links to itself
+relative to the repository root:
+
+```markdown
+### breaking
+
+- **feat(api):** drop the v1 endpoint ([`35e452c`](../../commit/35e452cdf863…))
+
+### feat
+
+- **api:** add batch endpoint ([`b10797a`](../../commit/b10797aa2af6…))
+```
+
+A breaking commit appears only under `breaking`, where its own type prefixes the
+subject. Only the `!` marker is read; `BREAKING CHANGE:` in a commit body is not
+detected.
+
+Relative links follow forks and GitHub Enterprise hosts without configuration.
+The link depth is computed for the changelog's own path, so it resolves from the
+rendered changelog. The same entry is reused as the GitHub Release body, which
+is rendered from a different URL; check the first published release if those
+links matter.
 
 Moving tags are optional. For a stable `v2.3.0` release, `major minor` updates
 `v2` and `v2.3` to the same commit. They are force-updated atomically with the
@@ -221,13 +287,14 @@ Use [pre-commit](https://pre-commit.com/) for fast, project-specific checks
 before changes enter release history:
 
 ```console
-mise run release:setup-hooks
+./.release-scripts/release setup-hooks
 pre-commit run --all-files
 ```
 
-The setup task uses the project's active pre-commit when available; otherwise
-mise automatically installs pre-commit 4. It installs both `pre-commit` and
-`commit-msg` Git hooks. If `.pre-commit-config.yaml` is absent, it creates a
+With mise, run `mise run release:setup-hooks`. The setup task uses the project's
+active pre-commit when available; otherwise mise automatically installs
+pre-commit 4. Without mise, install pre-commit first. It installs both
+`pre-commit` and `commit-msg` Git hooks. If `.pre-commit-config.yaml` is absent, it creates a
 minimal configuration with Commitizen validation pinned to `v4.10.0`. Existing
 tool and hook configuration is validated and left unchanged; its rules remain
 owned by the target project. Review and commit a newly generated configuration.
@@ -263,10 +330,9 @@ The built-in generator updates `RELEASE_CHANGELOG` and writes GitHub release
 notes. For a bespoke format, disable the built-in changelog file and configure
 a command that writes the exported `$RELEASE_NOTES_FILE`:
 
-```toml
-[env]
-RELEASE_CHANGELOG = "false"
-RELEASE_CHANGELOG_COMMAND = "./scripts/release-changelog.sh \"$RELEASE_PREVIOUS_TAG\" \"$RELEASE_VERSION\" \"$RELEASE_NOTES_FILE\""
+```bash
+RELEASE_CHANGELOG='false'
+RELEASE_CHANGELOG_COMMAND='./scripts/release-changelog.sh "$RELEASE_PREVIOUS_TAG" "$RELEASE_VERSION" "$RELEASE_NOTES_FILE"'
 ```
 
 The command also receives `RELEASE_TAG`. Tracked files it changes are included
@@ -275,11 +341,10 @@ in the release commit; it should `git add` any newly created changelog files.
 ### Tag prefix
 
 Tags use `vX.Y.Z` by default. To create `X.Y.Z` tags instead, set an explicitly
-empty prefix in `mise.toml`:
+empty prefix in `.release.env` or the mise environment:
 
-```toml
-[env]
-RELEASE_TAG_PREFIX = ""
+```bash
+RELEASE_TAG_PREFIX=''
 ```
 
 When moving tags are enabled, their names likewise become `X` and `X.Y`.
@@ -290,8 +355,8 @@ For repositories that publish a GitHub Action, prefer
 Create only the local commit and tag:
 
 ```console
-mise run release --no-publish patch
-mise run release:github v1.2.3
+./.release-scripts/release --no-publish patch
+./.release-scripts/release github v1.2.3
 ```
 
 ## Configuration
@@ -317,7 +382,8 @@ contain spaces, but the glob patterns themselves may not.
 - Before a tag is created: inspect or revert changes made by the configured
   version/build commands, then rerun from a clean tree.
 - After a tag is created: retry only publication with
-  `mise run release:github <tag>`. If moving tags were supplied only on the
+  `./.release-scripts/release github <tag>` (or `mise run release:github <tag>`).
+  If moving tags were supplied only on the
   command line, repeat `--moving-tags major,minor` during the retry.
 - Inspect the next operation without changes using `--dry-run`; dirty working
   trees are allowed and GitHub authentication is not required.
@@ -326,16 +392,15 @@ contain spaces, but the glob patterns themselves may not.
 
 The Dropbox publisher is separate from the GitHub release flow:
 
-```toml
-[env]
-RELEASE_ARTIFACTS = "dist/*.zip"
-RELEASE_DROPBOX_PATH = "my-project/releases"
+```bash
+RELEASE_ARTIFACTS='dist/*.zip'
+RELEASE_DROPBOX_PATH='my-project/releases'
 ```
 
 Add a configured `.dropboxuploader` file, then run:
 
 ```console
-mise run release:dropbox
+./.release-scripts/release dropbox
 ```
 
 This task uses the bundled `tools/dropbox_uploader.sh`; a project-local uploader

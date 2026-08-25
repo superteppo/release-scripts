@@ -5,6 +5,7 @@ REPOSITORY_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$REPOSITORY_ROOT"
 
 SHELL_FILES=(
+    release
     lib/*.sh
     ./*.sh
     mise-tasks/release/*
@@ -44,6 +45,9 @@ done
 
 printf '%s\n' '==> Release integration tests'
 tests/test-release.sh
+
+printf '%s\n' '==> Standalone installation tests'
+tests/test-standalone.sh
 
 printf '%s\n' '==> Whitespace'
 git diff --check

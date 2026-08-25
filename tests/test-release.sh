@@ -112,7 +112,7 @@ assert_eq "$(cat VERSION)" "1.3.0"
 git rev-parse -q --verify refs/tags/v1.3.0 >/dev/null || fail "promoted tag was not created"
 # The stable entry absorbs the candidate entries it supersedes.
 assert_file_contains CHANGELOG.md "## 1.3.0 -"
-assert_file_contains CHANGELOG.md "fix: correct candidate behaviour"
+assert_file_contains CHANGELOG.md "- correct candidate behaviour (["
 assert_file_contains CHANGELOG.md "## 1.2.4 -"
 if grep -Fq -- "## 1.3.0-rc." CHANGELOG.md; then
     fail "promoted changelog still lists release candidates"
@@ -341,6 +341,46 @@ export RELEASE_CHANGELOG_COMMAND='printf "Release %s\n" "$RELEASE_VERSION" > "$R
 git rev-parse -q --verify refs/tags/v2.0.0 >/dev/null || fail "custom-changelog release tag was not created"
 assert_file_contains CUSTOM_CHANGELOG.txt "Version 2.0.0"
 assert_eq "$(git show HEAD:CUSTOM_CHANGELOG.txt)" "Version 2.0.0"
+
+# Changelog entries group commits by Conventional Commit type in a fixed order.
+GROUPING_PROJECT="$TMP_ROOT/grouping"
+mkdir -p "$GROUPING_PROJECT"
+cd "$GROUPING_PROJECT"
+git init -q
+git checkout -q -b main
+git config user.name "Release Tests"
+git config user.email "release-tests@example.invalid"
+for subject in \
+    "Unprefixed legacy commit" \
+    "wip: experiment with caching" \
+    "chore: bump tooling" \
+    "ci: cache dependencies" \
+    "build: switch bundler" \
+    "style: reformat sources" \
+    "test: cover the parser" \
+    "refactor: tidy internals" \
+    "perf: speed up the parser" \
+    "docs: explain the parser" \
+    "fix(parser): handle empty input" \
+    "feat: add batch mode" \
+    "feat(api)!: drop the v1 endpoint"; do
+    printf '%s\n' "$subject" >> changes.txt
+    git add changes.txt
+    git commit -q -m "$subject"
+done
+unset RELEASE_CHANGELOG RELEASE_CHANGELOG_COMMAND
+"$REPOSITORY_ROOT/lib/changelog.sh" --version 1.0.0 >/dev/null
+assert_eq "$(grep '^### ' CHANGELOG.md)" \
+    $'### breaking\n### feat\n### fix\n### docs\n### perf\n### refactor\n### test\n### style\n### build\n### ci\n### chore\n### wip\n### other'
+assert_file_contains CHANGELOG.md "- **feat(api):** drop the v1 endpoint (["
+assert_file_contains CHANGELOG.md "- **parser:** handle empty input (["
+assert_file_contains CHANGELOG.md "- Unprefixed legacy commit (["
+assert_file_contains CHANGELOG.md "](../../commit/$(git rev-parse HEAD))"
+
+# Commit links stay relative to a changelog kept outside the repository root.
+mkdir -p docs
+"$REPOSITORY_ROOT/lib/changelog.sh" --version 1.0.0 --output docs/CHANGELOG.md >/dev/null
+assert_file_contains docs/CHANGELOG.md "](../../../commit/$(git rev-parse HEAD))"
 
 # Hook setup creates a default once and never rewrites project-owned config.
 HOOK_PROJECT="$TMP_ROOT/hooks"

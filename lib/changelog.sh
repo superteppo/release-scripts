@@ -11,10 +11,10 @@ usage() {
     cat <<'EOF'
 Usage: changelog.sh [--version VERSION] [--from TAG] [--output FILE] [--notes FILE]
 
-Generate a Markdown changelog entry from Git commits. VERSION defaults to
-Unreleased and FILE defaults to CHANGELOG.md. A stable X.Y.Z version replaces
-the release-candidate entries it supersedes, so it defaults to covering commits
-from the latest stable tag.
+Generate a Markdown changelog entry from Git commits, grouped by Conventional
+Commit type. VERSION defaults to Unreleased and FILE defaults to CHANGELOG.md.
+A stable X.Y.Z version replaces the release-candidate entries it supersedes, so
+it defaults to covering commits from the latest stable tag.
 EOF
 }
 
@@ -55,19 +55,88 @@ RANGE=HEAD
 LOG_ARGS=("$RANGE" --extended-regexp --invert-grep --grep='^chore\(release\): ')
 ENTRY=$(mktemp "${TMPDIR:-/tmp}/release-changelog.XXXXXX")
 UPDATED=$(mktemp "${TMPDIR:-/tmp}/release-changelog-updated.XXXXXX")
-trap 'rm -f "$ENTRY" "$UPDATED"' EXIT
+COMMITS=$(mktemp "${TMPDIR:-/tmp}/release-changelog-commits.XXXXXX")
+HISTORY=$(mktemp "${TMPDIR:-/tmp}/release-changelog-history.XXXXXX")
+trap 'rm -f "$ENTRY" "$UPDATED" "$COMMITS" "$HISTORY"' EXIT
+
+# Commit links stay relative so they resolve on any GitHub host or fork. From
+# <repo>/blob/<ref>/<changelog>, two levels up is the repository root.
+LINK_PREFIX=../..
+LINK_DIR=$(dirname "$OUTPUT")
+while [[ "$LINK_DIR" != . && "$LINK_DIR" != / && -n "$LINK_DIR" ]]; do
+    LINK_PREFIX="../${LINK_PREFIX}"
+    LINK_DIR=$(dirname "$LINK_DIR")
+done
+
+# Commits are bucketed by Conventional Commit type; anything unprefixed is other.
+# The order lists the types named by Conventional Commits 1.0.0 by how much they
+# concern a reader of the changelog, leaving the tooling types last.
+TAB=$'\t'
+TYPE_ORDER=(feat fix docs perf refactor test style build ci chore)
+TYPE_PATTERN='^([a-zA-Z][a-zA-Z0-9_-]*)(\(([^)]+)\))?(!)?:[[:space:]]+(.*)$'
+git log "${LOG_ARGS[@]}" --pretty=tformat:'%h%x1f%H%x1f%s' > "$HISTORY" || \
+    release_die "could not read Git history"
+while IFS=$'\x1f' read -r short full subject; do
+    type=other
+    scope=""
+    breaking=""
+    text=$subject
+    if [[ "$subject" =~ $TYPE_PATTERN ]]; then
+        type=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+        scope=${BASH_REMATCH[3]}
+        breaking=${BASH_REMATCH[4]}
+        text=${BASH_REMATCH[5]}
+    fi
+    # Breaking changes lead the entry, so they keep their type in the label.
+    bucket=$type
+    label=$scope
+    if [[ -n "$breaking" ]]; then
+        bucket=breaking
+        label=$type
+        [[ -z "$scope" ]] || label="${type}(${scope})"
+    fi
+    item="- "
+    [[ -z "$label" ]] || item="${item}**${label}:** "
+    item="${item}${text} ([\`${short}\`](${LINK_PREFIX}/commit/${full}))"
+    printf '%s%s%s\n' "$bucket" "$TAB" "$item" >> "$COMMITS"
+done < "$HISTORY"
+
+group_present() {
+    grep -q "^${1}${TAB}" "$COMMITS"
+}
+
+# Breaking changes lead, then the known types, then project-specific types
+# alphabetically, and finally the commits with no Conventional Commit type.
+TYPE_GROUPS=()
+if group_present breaking; then
+    TYPE_GROUPS+=(breaking)
+fi
+for type in "${TYPE_ORDER[@]}"; do
+    if group_present "$type"; then
+        TYPE_GROUPS+=("$type")
+    fi
+done
+while IFS= read -r type; do
+    [[ -n "$type" ]] || continue
+    case " ${TYPE_ORDER[*]} breaking other " in
+        *" $type "*) continue ;;
+    esac
+    TYPE_GROUPS+=("$type")
+done < <(cut -f1 "$COMMITS" | sort -u)
+if group_present other; then
+    TYPE_GROUPS+=(other)
+fi
 
 {
-    printf '## %s - %s\n\n' "$VERSION" "$(date +%Y-%m-%d)"
-    # Git expands %s and %h; the shell must not.
-    # shellcheck disable=SC2016
-    if ! git log "${LOG_ARGS[@]}" --pretty=format:'- %s (`%h`)' | sed '/^[[:space:]]*$/d'; then
-        release_die "could not read Git history"
+    printf '## %s - %s\n' "$VERSION" "$(date +%Y-%m-%d)"
+    if [[ ${#TYPE_GROUPS[@]} -eq 0 ]]; then
+        printf '\n- No user-visible changes.\n'
+    else
+        for type in "${TYPE_GROUPS[@]}"; do
+            printf '\n### %s\n\n' "$type"
+            grep "^${type}${TAB}" "$COMMITS" | cut -f2-
+        done
     fi
-    if [[ -z "$(git log "${LOG_ARGS[@]}" --pretty=format:%s)" ]]; then
-        printf '%s' '- No user-visible changes.'
-    fi
-    printf '\n'
 } > "$ENTRY"
 
 if [[ -n "$NOTES" ]]; then

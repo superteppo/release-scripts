@@ -10,7 +10,16 @@ PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
     printf 'ERROR: not inside a Git repository\n' >&2
     exit 1
 }
-CONFIG="$PROJECT_ROOT/mise.toml"
+CONFIG_FORMAT=${RELEASE_SETUP_CONFIG_FORMAT:-mise}
+if [[ "$CONFIG_FORMAT" == env ]]; then
+    CONFIG="$PROJECT_ROOT/.release.env"
+    SETUP_COMMAND='release setup'
+    RELEASE_COMMAND="$REPOSITORY_ROOT/release"
+else
+    CONFIG="$PROJECT_ROOT/mise.toml"
+    SETUP_COMMAND=release:setup
+    RELEASE_COMMAND='mise run release'
+fi
 DRY_RUN=false
 ACCEPT_DEFAULTS=false
 SETTINGS=()
@@ -20,9 +29,8 @@ if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
 fi
 
 usage() {
+    printf 'Usage: %s [--dry-run] [--yes]\n\n' "$SETUP_COMMAND"
     cat <<'EOF'
-Usage: release:setup [--dry-run] [--yes]
-
 Configure release defaults and optional Git hooks without replacing existing
 release configuration.
 
@@ -103,9 +111,32 @@ setting_exists() {
 print_setting() {
     local name=$1
     local value=$2
-    value=${value//\\/\\\\}
-    value=${value//\"/\\\"}
-    printf '%s="%s"' "$name" "$value"
+    if [[ "$CONFIG_FORMAT" == env ]]; then
+        value=${value//\'/\'\\\'\'}
+        printf "%s='%s'" "$name" "$value"
+    else
+        value=${value//\\/\\\\}
+        value=${value//\"/\\\"}
+        printf '%s="%s"' "$name" "$value"
+    fi
+}
+
+write_env_settings() {
+    local work next setting name value
+    work=$(mktemp "${TMPDIR:-/tmp}/release-env.XXXXXX")
+    if [[ -e "$CONFIG" ]]; then
+        cp "$CONFIG" "$work"
+    fi
+    for setting in "${SETTINGS[@]}"; do
+        name=${setting%%=*}
+        value=${setting#*=}
+        next=$(mktemp "${TMPDIR:-/tmp}/release-env-next.XXXXXX")
+        awk -v name="$name" '$0 !~ "^(export[[:space:]]+)?" name "="' "$work" > "$next"
+        mv "$next" "$work"
+        print_setting "$name" "$value" >> "$work"
+        printf '\n' >> "$work"
+    done
+    mv "$work" "$CONFIG"
 }
 
 queue_setting() {
@@ -227,17 +258,25 @@ case "$ANSWER" in
         queue_setting RELEASE_SET_VERSION 'uv version "$RELEASE_VERSION_PEP440"'
         ;;
     tags) printf 'Use Git tags as the version source.\n' ;;
-    manual) printf 'Leave version hooks for manual configuration in mise.toml.\n' ;;
+    manual) printf 'Leave version hooks for manual configuration in %s.\n' "$CONFIG" ;;
     existing) printf 'Keep existing version-ownership configuration.\n' ;;
 esac
 
 INSTALL_HOOKS=false
-ask_choice 4 'Install pre-commit and Conventional Commit hooks' yes yes no
+HOOK_DEFAULT=yes
+if ! command -v pre-commit >/dev/null 2>&1 && ! command -v mise >/dev/null 2>&1; then
+    HOOK_DEFAULT=no
+fi
+ask_choice 4 'Install pre-commit and Conventional Commit hooks' "$HOOK_DEFAULT" yes no
 [[ "$ANSWER" == yes ]] && INSTALL_HOOKS=true
 
 printf '\nProposed actions (not applied yet):\n'
 if [[ ${#SETTINGS[@]} -gt 0 ]]; then
-    printf '  update %s through mise:\n' "$CONFIG"
+    if [[ "$CONFIG_FORMAT" == env ]]; then
+        printf '  update %s:\n' "$CONFIG"
+    else
+        printf '  update %s through mise:\n' "$CONFIG"
+    fi
     for setting in "${SETTINGS[@]}"; do
         printf '    '
         print_setting "${setting%%=*}" "${setting#*=}"
@@ -249,8 +288,10 @@ fi
 $INSTALL_HOOKS && printf '  configure pre-commit and commit-msg hooks\n'
 if command -v gh >/dev/null 2>&1; then
     printf '  use existing gh: %s\n' "$(command -v gh)"
-else
+elif command -v mise >/dev/null 2>&1; then
     printf '  use mise-managed gh@2 when GitHub access is needed\n'
+else
+    printf '  GitHub CLI must be installed before releasing\n'
 fi
 
 if $DRY_RUN; then
@@ -265,16 +306,36 @@ if [[ "$ANSWER" != yes ]]; then
 fi
 
 if [[ ${#SETTINGS[@]} -gt 0 ]]; then
-    mise set --file "$CONFIG" "${SETTINGS[@]}"
+    if [[ "$CONFIG_FORMAT" == env ]]; then
+        write_env_settings
+        set -a
+        # The setup command just wrote this project-owned configuration.
+        # shellcheck disable=SC1090
+        source "$CONFIG"
+        set +a
+    else
+        mise set --file "$CONFIG" "${SETTINGS[@]}"
+    fi
 fi
 if $INSTALL_HOOKS; then
     "$REPOSITORY_ROOT/mise-tasks/release/setup-hooks"
 fi
 
 printf '\n==> Release doctor\n'
-if ! mise exec --fresh-env -C "$PROJECT_ROOT" -- "$REPOSITORY_ROOT/lib/doctor.sh"; then
+if [[ "$CONFIG_FORMAT" == env ]]; then
+    DOCTOR=("$REPOSITORY_ROOT/lib/doctor.sh")
+else
+    DOCTOR=(mise exec --fresh-env -C "$PROJECT_ROOT" -- "$REPOSITORY_ROOT/lib/doctor.sh")
+fi
+if ! "${DOCTOR[@]}"; then
     printf '\nSetup is complete, but doctor found items to resolve before releasing.\n' >&2
-    printf 'For GitHub authentication, run: mise exec gh@2 -- gh auth login\n' >&2
+    if command -v gh >/dev/null 2>&1; then
+        printf 'For GitHub authentication, run: gh auth login\n' >&2
+    elif command -v mise >/dev/null 2>&1; then
+        printf 'For GitHub authentication, run: mise exec gh@2 -- gh auth login\n' >&2
+    else
+        printf 'Install GitHub CLI, then run: gh auth login\n' >&2
+    fi
     exit 0
 fi
-printf '\nSetup complete. Preview the first release with: mise run release --dry-run auto\n'
+printf '\nSetup complete. Preview the first release with: %s --dry-run auto\n' "$RELEASE_COMMAND"

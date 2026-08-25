@@ -14,9 +14,12 @@ CONFIG="$PROJECT_ROOT/.pre-commit-config.yaml"
 if command -v pre-commit >/dev/null 2>&1; then
     PRE_COMMIT=(pre-commit)
     printf 'Using project pre-commit: %s\n' "$(command -v pre-commit)"
-else
+elif command -v mise >/dev/null 2>&1; then
     PRE_COMMIT=(mise exec pre-commit@4 -- pre-commit)
     printf 'Project pre-commit not found; mise will install pre-commit 4.\n'
+else
+    printf 'ERROR: pre-commit is required when mise is unavailable\n' >&2
+    exit 1
 fi
 
 if [[ -e "$CONFIG" ]]; then
