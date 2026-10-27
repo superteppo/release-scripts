@@ -205,6 +205,38 @@ checks, builds, and artifacts. It then updates `CHANGELOG.md`, creates a release
 commit and annotated tag, pushes them, and creates the GitHub Release with `gh`.
 Release assets are replaced safely when GitHub publishing is retried.
 
+### Release thresholds
+
+For frequent deployments, keep patch releases small while keeping full
+changelogs for minor and major releases:
+
+```sh
+./.release-scripts/release auto --changelog minor --release patch
+```
+
+`--changelog minor` updates the changelog file for minor and major releases.
+Patch releases still get generated notes, a Git tag, and a GitHub Release, but
+do not update the changelog file or run a custom changelog hook. Tag-based
+projects therefore need no release commit for patches; package-version changes
+still get committed. Checks, builds and artifact validation always run.
+
+`--release patch` publishes a GitHub Release for every bump. Set it to `minor`
+or `major` to publish Git tags without GitHub Releases below that threshold.
+Both options accept `patch`, `minor`, `major`, or `none`; `none` disables that
+output. Both default to `patch`, preserving the existing full release flow.
+Release candidates and promotions use their base version bump for thresholds.
+
+The matching configuration is:
+
+```sh
+RELEASE_CHANGELOG_THRESHOLD='minor'
+RELEASE_GITHUB_THRESHOLD='patch'
+```
+
+Put it in `.release.env` (or `[env]` in `mise.toml`). Command-line thresholds
+override these settings. `--no-publish` and `--dry-run` work as usual. To retry
+publishing only Git refs, use `release github TAG --tag-only`.
+
 ### Changelog entries
 
 An entry lists every commit since the previous release except the

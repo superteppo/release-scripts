@@ -484,3 +484,111 @@ PATH="$SETUP_BIN:/usr/bin:/bin" release_gh auth status
 assert_file_contains "$SETUP_MISE_LOG" "exec gh@2 -- gh auth status"
 
 printf 'All release tests passed.\n'
+
+
+# Thresholds retain checks and GitHub publishing without a patch changelog commit.
+LIGHT_PROJECT="$TMP_ROOT/lightweight"
+LIGHT_REMOTE="$TMP_ROOT/lightweight.git"
+mkdir -p "$LIGHT_PROJECT"
+cd "$LIGHT_PROJECT"
+git init -q
+git checkout -q -b main
+git config user.name "Release Tests"
+git config user.email release-tests@example.invalid
+printf 'base\n' > tracked
+git add tracked
+git commit -qm 'fix: initial behaviour'
+git init -q --bare "$LIGHT_REMOTE"
+git remote add origin "$LIGHT_REMOTE"
+unset RELEASE_GET_VERSION RELEASE_SET_VERSION RELEASE_ARTIFACTS RELEASE_BUILD_COMMAND RELEASE_CHANGELOG_COMMAND RELEASE_CHANGELOG RELEASE_MOVING_TAGS
+export RELEASE_BRANCH_PATTERN=main
+export RELEASE_CHANGELOG_THRESHOLD=minor
+export RELEASE_CHECK_COMMAND='test -s tracked'
+BEFORE=$(git rev-parse HEAD)
+PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/release.sh" auto >/dev/null
+assert_eq "$(git rev-parse HEAD)" "$BEFORE"
+[[ ! -e CHANGELOG.md ]] || fail "lightweight patch wrote a changelog"
+assert_eq "$(git --git-dir="$LIGHT_REMOTE" rev-parse 'v0.0.1^{}')" "$BEFORE"
+assert_file_contains .git/release-notes-v0.0.1.md 'initial behaviour'
+assert_file_contains "$GH_LOG" 'release create v0.0.1'
+
+# Failed checks and malformed scopes must not produce tags.
+if RELEASE_CHECK_COMMAND=false "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null 2>&1; then
+    fail "lightweight release skipped checks"
+fi
+git rev-parse -q --verify refs/tags/v0.0.2 >/dev/null 2>&1 && fail "failed check created a tag"
+if "$REPOSITORY_ROOT/lib/release.sh" --dry-run --changelog invalid patch >/dev/null 2>&1; then
+    fail "invalid changelog threshold accepted"
+fi
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run --changelog minor minor)
+assert_file_contains <(printf '%s\n' "$PLAN") 'Changelog: true'
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run --changelog patch patch)
+assert_file_contains <(printf '%s\n' "$PLAN") 'Changelog: true'
+assert_eq "$(git rev-parse HEAD)" "$BEFORE"
+
+printf 'feature\n' >> tracked
+git commit -qam 'feat: add a feature'
+"$REPOSITORY_ROOT/lib/release.sh" --no-publish auto >/dev/null
+assert_file_contains CHANGELOG.md '## 0.1.0 -'
+assert_eq "$(git log -1 --pretty=%s)" 'chore(release): v0.1.0'
+CHANGELOG_BEFORE=$(cat CHANGELOG.md)
+printf 'patch\n' >> tracked
+git commit -qam 'fix: correct feature'
+BEFORE=$(git rev-parse HEAD)
+"$REPOSITORY_ROOT/lib/release.sh" --no-publish auto >/dev/null
+assert_eq "$(cat CHANGELOG.md)" "$CHANGELOG_BEFORE"
+assert_eq "$(git rev-parse HEAD)" "$BEFORE"
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run --pre patch)
+assert_file_contains <(printf '%s\n' "$PLAN") 'Changelog: false'
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run major)
+assert_file_contains <(printf '%s\n' "$PLAN") 'Changelog: true'
+
+# Package version ownership still requires a commit for a lightweight patch.
+printf '0.1.1\n' > VERSION
+git add VERSION
+git commit -qm 'chore: track package version'
+# Expanded later by the configured version hook.
+# shellcheck disable=SC2016
+RELEASE_GET_VERSION='cat VERSION' RELEASE_SET_VERSION='printf "%s\n" "$RELEASE_VERSION" > VERSION' \
+    "$REPOSITORY_ROOT/lib/release.sh" --no-publish patch >/dev/null
+assert_eq "$(cat VERSION)" '0.1.2'
+assert_eq "$(cat CHANGELOG.md)" "$CHANGELOG_BEFORE"
+assert_eq "$(git log -1 --pretty=%s)" 'chore(release): v0.1.2'
+printf 'Changelog threshold tests passed.\n'
+
+
+# A release threshold may publish tags without gh, notes, or release assets.
+BEFORE=$(git rev-parse HEAD)
+PATH=/usr/bin:/bin "$REPOSITORY_ROOT/lib/release.sh" --release minor patch >/dev/null
+assert_file_contains .git/release-notes-v0.1.3.md 'No user-visible changes.'
+assert_eq "$(git --git-dir="$LIGHT_REMOTE" rev-parse 'v0.1.3^{}')" "$BEFORE"
+if grep -Fq 'release create v0.1.3' "$GH_LOG"; then fail "patch below release threshold created a GitHub Release"; fi
+if "$REPOSITORY_ROOT/lib/release.sh" --dry-run --release invalid patch >/dev/null 2>&1; then
+    fail "invalid release threshold accepted"
+fi
+for bump in patch minor major; do
+    for threshold in patch minor major none; do
+        case "$threshold:$bump" in
+            patch:*|minor:minor|minor:major|major:major) expected=true ;;
+            *) expected=false ;;
+        esac
+        actual=false
+        release_meets_threshold "$bump" "$threshold" && actual=true
+        assert_eq "$actual" "$expected"
+    done
+done
+assert_eq "$(release_version_scope 1.2.3 2.0.0)" major
+assert_eq "$(release_version_scope 1.2.3 1.3.0)" minor
+assert_eq "$(release_version_scope 1.2.3 1.2.4)" patch
+printf 'Threshold release tests passed.\n'
+
+PLAN=$(RELEASE_GITHUB_THRESHOLD=none "$REPOSITORY_ROOT/lib/release.sh" --dry-run --release patch patch)
+assert_file_contains <(printf '%s\n' "$PLAN") 'GitHub release: true'
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run --changelog none --release none major)
+assert_file_contains <(printf '%s\n' "$PLAN") 'Changelog: false'
+assert_file_contains <(printf '%s\n' "$PLAN") 'GitHub release: false'
+PLAN=$("$REPOSITORY_ROOT/lib/release.sh" --dry-run --pre minor)
+assert_file_contains <(printf '%s\n' "$PLAN") 'Changelog: true'
+if RELEASE_GITHUB_THRESHOLD=invalid PATH="$MOCK_BIN:$PATH" "$REPOSITORY_ROOT/lib/doctor.sh" >/dev/null 2>&1; then
+    fail "doctor accepted an invalid release threshold"
+fi
