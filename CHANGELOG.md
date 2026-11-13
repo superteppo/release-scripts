@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0 - 2026-11-13
+
+### feat
+
+- **release:** add changelog and GitHub release thresholds ([`dc9066a`](../../commit/dc9066acc6b4e9af270fe677c9b148cf86971cbe))
+
 ## 2.0.0 - 2026-08-25
 
 ### breaking
